@@ -1014,9 +1014,14 @@ export function OrdinaryGetOwnProperty(realm: Realm, O: ObjectValue, P: Property
           // In this case it is safe to defer the property access to runtime (at this point in time)
           invariant(realm.generator);
           let pname = realm.generator.getAsPropertyNameExpression(P);
-          let absVal = AbstractValue.createTemporalFromBuildFunction(realm, Value, [O], ([node]) =>
-            t.memberExpression(node, pname, !t.isIdentifier(pname))
-          );
+          // Hack
+          let buildNode = ([node]) => t.memberExpression(node, pname, !t.isIdentifier(pname));
+          let absVal = AbstractValue.createTemporalFromBuildFunction(realm, Value, [O], buildNode);
+          debugger;
+          if (typeof absVal._buildNode !== 'function') {
+            debugger;
+            absVal._buildNode = buildNode;
+          }
           return { configurabe: true, enumerable: true, value: absVal, writable: true };
         } else {
           invariant(P instanceof SymbolValue);
