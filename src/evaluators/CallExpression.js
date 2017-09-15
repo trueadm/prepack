@@ -128,11 +128,11 @@ function EvaluateCall(
         if (realm.handleError(diag) !== "Recover") throw new FatalError();
       }
     }
-    return AbstractValue.createTemporalFromBuildFunction(realm, Value, args, nodes => {
+    let buildNode = nodes => {
       let callFunc;
       let argStart = 1;
       if (thisArg instanceof Value) {
-        if (typeof propName === "string") {
+        if (typeof propName === "string" || thisArg === Value) {
           callFunc = t.memberExpression(nodes[0], t.identifier(propName), !t.isValidIdentifier(propName));
         } else {
           callFunc = t.memberExpression(nodes[0], nodes[1], true);
@@ -143,7 +143,15 @@ function EvaluateCall(
       }
       let fun_args = ((nodes.slice(argStart): any): Array<BabelNodeExpression | BabelNodeSpreadElement>);
       return t.callExpression(callFunc, fun_args);
-    });
+    };
+    let foo = AbstractValue.createTemporalFromBuildFunction(realm, Value, args, buildNode);
+    if (typeof foo._buildNode !== 'function') {
+      foo._buildNode = buildNode;
+      if (args[0].intrinsicName !== propName) {
+        thisArg = Value;
+      }
+    }
+    return foo;
   }
 
   if (func instanceof AbstractValue) {

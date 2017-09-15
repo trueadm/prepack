@@ -25,9 +25,6 @@ export default function buildExpressionTemplate(code: string): (void | PreludeGe
         },
         obj
       );
-      if (template(obj) == null) {
-        debugger;
-      }
     let result = template(obj).expression;
     invariant(result !== undefined, "Code does not represent an expression: " + code);
     return result;
