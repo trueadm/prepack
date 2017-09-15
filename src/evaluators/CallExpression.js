@@ -131,8 +131,8 @@ function EvaluateCall(
     let buildNode = nodes => {
       let callFunc;
       let argStart = 1;
-      if (thisArg instanceof Value) {
-        if (typeof propName === "string" || thisArg === Value) {
+      if (thisArg instanceof Value || thisArg === Value) {
+        if (typeof propName === "string") {
           callFunc = t.memberExpression(nodes[0], t.identifier(propName), !t.isValidIdentifier(propName));
         } else {
           callFunc = t.memberExpression(nodes[0], nodes[1], true);
