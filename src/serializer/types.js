@@ -23,6 +23,8 @@ export type FunctionInstance = {
   serializedBindings: SerializedBindings,
   functionValue: ECMAScriptSourceFunctionValue,
   insertionPoint?: BodyReference,
+  // Optional place to put the function declaration
+  preludeOverride?: Array<BabelNodeStatement>,
   scopeInstances: Set<ScopeBinding>,
 };
 
@@ -55,7 +57,7 @@ export type VisitedBinding = {
 export type ScopeBinding = {
   name: string,
   id: number,
-  initializationValues: Map<string, BabelNodeExpression>,
+  initializationValues: Array<BabelNodeExpression>,
   capturedScope?: string,
 };
 
