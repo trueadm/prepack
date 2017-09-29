@@ -39,6 +39,30 @@ function shouldVisit(node, data) {
   return (node: any)._renamedOnce !== data;
 }
 
+function convertExpressionToJSXIdentifier(expr) {
+  switch (expr.type) {
+    case "ThisExpression":
+      return t.jSXIdentifier("this");
+    case "Identifier":
+      return t.jSXIdentifier(expr.name);
+    case "StringLiteral":
+      return t.jSXIdentifier(expr.value);
+    case "MemberExpression":
+      if (expr.computed) {
+        throw new Error("Cannot inline computed expressions in JSX type.");
+      }
+      return t.jSXMemberExpression(
+        convertExpressionToJSXIdentifier(expr.object),
+        convertExpressionToJSXIdentifier(expr.property)
+      );
+    case "ArrowFunctionExpression":
+      return expr;
+    default:
+      debugger;
+      throw new Error("Invalid JSX Type: " + expr.type);
+  }
+}
+
 // replaceWith causes the node to be re-analysed, so to prevent double replacement
 // we add this property on the node to mark it such that it does not get replaced
 // again on this pass
@@ -48,12 +72,18 @@ function shouldVisit(node, data) {
 //       If necessary we could implement this by following node.parentPath and checking
 //       if any parent nodes are marked visited, but that seem unnecessary right now.let closureRefReplacer = {
 function replaceName(path, serializedBinding, name, data) {
-  if (path.scope.hasBinding(name, /*noGlobals*/ true)) return;
-
-  if (serializedBinding && shouldVisit(path.node, data)) {
-    markVisited(serializedBinding.serializedValue, data);
-    path.replaceWith(serializedBinding.serializedValue);
-  }
+  if (path.scope.hasBinding(name, /*noGlobals*/true)) return;
+  
+    if (serializedBinding && shouldVisit(path.node, data)) {
+      markVisited(serializedBinding.serializedValue, data);
+      var serializedValue = serializedBinding.serializedValue;
+  
+      if (path.node.type === 'JSXIdentifier' || path.node.type === 'JSXMemberIdentifier') {
+        path.replaceWith(convertExpressionToJSXIdentifier(serializedValue));
+      } else {
+        path.replaceWith(serializedBinding.serializedValue);
+      }
+    }
 }
 
 export let ClosureRefReplacer = {
