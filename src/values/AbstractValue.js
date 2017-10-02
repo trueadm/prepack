@@ -452,10 +452,10 @@ export default class AbstractValue extends Value {
   ): Value {
     let leftTypes, leftValues;
     if (left instanceof AbstractValue) {
-      if (!left.isIntrinsic()) {
-        if (!left.mightNotBeTrue()) return op === "&&" ? right : left;
-        if (!left.mightNotBeFalse()) return op === "&&" ? left : right;
-      }
+      // if (!left.isIntrinsic()) {
+      //   if (!left.mightNotBeTrue()) return op === "&&" ? right : left;
+      //   if (!left.mightNotBeFalse()) return op === "&&" ? left : right;
+      // }
       leftTypes = left.types;
       leftValues = left.values;
     } else {
