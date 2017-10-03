@@ -410,7 +410,6 @@ export class ResidualHeapVisitor {
       case "WeakSet":
         this.visitValueSet(val);
         return;
-        return;
       default:
         if (kind !== "Object") this.logger.logError(val, `Object of kind ${kind} is not supported in residual heap.`);
         if (this.$ParameterMap !== undefined)
