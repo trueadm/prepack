@@ -381,6 +381,7 @@ export class ResidualHeapVisitor {
       case "String":
       case "Boolean":
       case "ArrayBuffer":
+      case "ReactElement":
         return;
       case "Date":
         let dateValue = val.$DateValue;
@@ -408,6 +409,7 @@ export class ResidualHeapVisitor {
       case "Set":
       case "WeakSet":
         this.visitValueSet(val);
+        return;
         return;
       default:
         if (kind !== "Object") this.logger.logError(val, `Object of kind ${kind} is not supported in residual heap.`);

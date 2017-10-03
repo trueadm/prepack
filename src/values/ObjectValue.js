@@ -20,7 +20,7 @@ import type {
   PromiseReaction,
   PropertyBinding,
   PropertyKeyValue,
-  TypedArrayKind,
+  TypedArrayKind
 } from "../types.js";
 import {
   AbstractValue,
@@ -32,9 +32,12 @@ import {
   StringValue,
   SymbolValue,
   UndefinedValue,
-  Value,
+  Value
 } from "./index.js";
-import type { ECMAScriptSourceFunctionValue, NativeFunctionCallback } from "./index.js";
+import type {
+  ECMAScriptSourceFunctionValue,
+  NativeFunctionCallback
+} from "./index.js";
 import {
   joinValuesAsConditional,
   IsDataDescriptor,
@@ -48,7 +51,7 @@ import {
   OrdinarySet,
   OrdinaryIsExtensible,
   OrdinaryPreventExtensions,
-  ThrowIfMightHaveBeenDeleted,
+  ThrowIfMightHaveBeenDeleted
 } from "../methods/index.js";
 import invariant from "../invariant.js";
 
@@ -85,13 +88,17 @@ export default class ObjectValue extends ConcreteValue {
     "$StringIteratorNextIndex",
     "$IteratedString",
     "_isPartial",
-    "_isSimple",
+    "_isSimple"
   ];
 
   setupBindings() {
     for (let propName of ObjectValue.trackedProperties) {
       let desc = { writeable: true, value: undefined };
-      (this: any)[propName + "_binding"] = { descriptor: desc, object: this, key: propName };
+      (this: any)[propName + "_binding"] = {
+        descriptor: desc,
+        object: this,
+        key: propName
+      };
     }
   }
 
@@ -107,7 +114,7 @@ export default class ObjectValue extends ConcreteValue {
           let binding = this[propName + "_binding"];
           this.$Realm.recordModifiedProperty(binding);
           binding.descriptor.value = v;
-        },
+        }
       });
     }
   }
@@ -129,13 +136,15 @@ export default class ObjectValue extends ConcreteValue {
       filename: string,
       sourceCode: string,
       loc: { line: number, column: number },
-      stackDecorated: boolean,
-    },
+      stackDecorated: boolean
+    }
   };
 
   // function
   $Call: void | ((thisArgument: Value, argumentsList: Array<Value>) => Value);
-  $Construct: void | ((argumentsList: Array<Value>, newTarget: ObjectValue) => ObjectValue);
+  $Construct:
+    | void
+    | ((argumentsList: Array<Value>, newTarget: ObjectValue) => ObjectValue);
 
   // promise
   $Promise: ?ObjectValue;
@@ -186,7 +195,12 @@ export default class ObjectValue extends ConcreteValue {
   // regex
   $OriginalSource: void | string;
   $OriginalFlags: void | string;
-  $RegExpMatcher: void | ((S: string, lastIndex: number) => ?{ endIndex: number, captures: Array<any> });
+  $RegExpMatcher:
+    | void
+    | ((
+        S: string,
+        lastIndex: number
+      ) => ?{ endIndex: number, captures: Array<any> });
 
   // string
   $StringIteratorNextIndex: void | number;
@@ -294,7 +308,9 @@ export default class ObjectValue extends ConcreteValue {
   }
 
   setExtensible(v: boolean) {
-    this.$Extensible = v ? this.$Realm.intrinsics.true : this.$Realm.intrinsics.false;
+    this.$Extensible = v
+      ? this.$Realm.intrinsics.true
+      : this.$Realm.intrinsics.false;
   }
 
   getKind(): ObjectKind {
@@ -312,6 +328,7 @@ export default class ObjectValue extends ConcreteValue {
     if (this.$WeakMapData !== undefined) return "WeakMap";
     if (this.$WeakSetData !== undefined) return "WeakSet";
     if (this.$TypedArrayName !== undefined) return this.$TypedArrayName;
+    if (this.properties.has("$$typeof") === true) return "ReactElement";
     // TODO #26: Promises. All kinds of iterators. Generators.
     return "Object";
   }
@@ -326,28 +343,44 @@ export default class ObjectValue extends ConcreteValue {
     if (typeof name === "string") {
       if (this.intrinsicName) intrinsicName = `${this.intrinsicName}.${name}`;
     } else if (name instanceof SymbolValue) {
-      if (this.intrinsicName && name.intrinsicName) intrinsicName = `${this.intrinsicName}[${name.intrinsicName}]`;
+      if (this.intrinsicName && name.intrinsicName)
+        intrinsicName = `${this.intrinsicName}[${name.intrinsicName}]`;
     } else {
       invariant(false);
     }
     this.defineNativeProperty(
       name,
-      new NativeFunctionValue(this.$Realm, intrinsicName, name, length, callback, false),
+      new NativeFunctionValue(
+        this.$Realm,
+        intrinsicName,
+        name,
+        length,
+        callback,
+        false
+      ),
       desc
     );
   }
 
-  defineNativeProperty(name: SymbolValue | string, value?: Value, desc?: Descriptor = {}) {
+  defineNativeProperty(
+    name: SymbolValue | string,
+    value?: Value,
+    desc?: Descriptor = {}
+  ) {
     this.$DefineOwnProperty(name, {
       value,
       writable: true,
       enumerable: false,
       configurable: true,
-      ...desc,
+      ...desc
     });
   }
 
-  defineNativeGetter(name: SymbolValue | string, callback: NativeFunctionCallback, desc?: Descriptor = {}) {
+  defineNativeGetter(
+    name: SymbolValue | string,
+    callback: NativeFunctionCallback,
+    desc?: Descriptor = {}
+  ) {
     let intrinsicName, funcName;
     if (typeof name === "string") {
       funcName = `get ${name}`;
@@ -357,28 +390,39 @@ export default class ObjectValue extends ConcreteValue {
         name.$Description instanceof Value
           ? `get [${name.$Description.throwIfNotConcreteString().value}]`
           : `get [${"?"}]`;
-      if (this.intrinsicName && name.intrinsicName) intrinsicName = `${this.intrinsicName}[${name.intrinsicName}]`;
+      if (this.intrinsicName && name.intrinsicName)
+        intrinsicName = `${this.intrinsicName}[${name.intrinsicName}]`;
     } else {
       invariant(false);
     }
 
-    let func = new NativeFunctionValue(this.$Realm, intrinsicName, funcName, 0, callback);
+    let func = new NativeFunctionValue(
+      this.$Realm,
+      intrinsicName,
+      funcName,
+      0,
+      callback
+    );
     this.$DefineOwnProperty(name, {
       get: func,
       set: this.$Realm.intrinsics.undefined,
       enumerable: false,
       configurable: true,
-      ...desc,
+      ...desc
     });
   }
 
-  defineNativeConstant(name: SymbolValue | string, value?: Value, desc?: Descriptor = {}) {
+  defineNativeConstant(
+    name: SymbolValue | string,
+    value?: Value,
+    desc?: Descriptor = {}
+  ) {
     this.$DefineOwnProperty(name, {
       value,
       writable: false,
       enumerable: false,
       configurable: false,
-      ...desc,
+      ...desc
     });
   }
 
@@ -413,7 +457,10 @@ export default class ObjectValue extends ConcreteValue {
       let desc = propertyBinding.descriptor;
       if (desc === undefined) continue; // deleted
       ThrowIfMightHaveBeenDeleted(desc.value);
-      let serializedDesc: any = { enumerable: desc.enumerable, configurable: desc.configurable };
+      let serializedDesc: any = {
+        enumerable: desc.enumerable,
+        configurable: desc.configurable
+      };
       if (desc.value) {
         serializedDesc.writable = desc.writable;
         serializedDesc.value = desc.value.serialize(stack);
@@ -465,7 +512,10 @@ export default class ObjectValue extends ConcreteValue {
 
   // ECMA262 9.1.7
   $HasProperty(P: PropertyKeyValue): boolean {
-    if (this.unknownProperty !== undefined && this.$GetOwnProperty(P) === undefined) {
+    if (
+      this.unknownProperty !== undefined &&
+      this.$GetOwnProperty(P) === undefined
+    ) {
       AbstractValue.reportIntrospectionError(this, P);
       throw new FatalError();
     }
@@ -476,7 +526,11 @@ export default class ObjectValue extends ConcreteValue {
   // ECMA262 9.1.8
   $Get(P: PropertyKeyValue, Receiver: Value): Value {
     let prop = this.unknownProperty;
-    if (prop !== undefined && prop.descriptor !== undefined && this.$GetOwnProperty(P) === undefined) {
+    if (
+      prop !== undefined &&
+      prop.descriptor !== undefined &&
+      this.$GetOwnProperty(P) === undefined
+    ) {
       let desc = prop.descriptor;
       invariant(desc !== undefined);
       let val = desc.value;
@@ -487,7 +541,10 @@ export default class ObjectValue extends ConcreteValue {
       } else if (typeof P === "string") {
         propName = new StringValue(this.$Realm, P);
       } else {
-        AbstractValue.reportIntrospectionError(val, "abstract computed property name");
+        AbstractValue.reportIntrospectionError(
+          val,
+          "abstract computed property name"
+        );
         throw new FatalError();
       }
       return this.specializeJoin(val, propName);
@@ -507,7 +564,11 @@ export default class ObjectValue extends ConcreteValue {
     // If all else fails, use this expression
     let result;
     if (this.isPartialObject()) {
-      result = AbstractValue.createFromType(this.$Realm, Value, "sentinel member expression");
+      result = AbstractValue.createFromType(
+        this.$Realm,
+        Value,
+        "sentinel member expression"
+      );
       result.args = [this, P];
     } else {
       result = this.$Realm.intrinsics.undefined;
@@ -549,15 +610,28 @@ export default class ObjectValue extends ConcreteValue {
     invariant(generic_cond instanceof AbstractValue);
     let cond = this.specializeCond(generic_cond, propName);
     let arg1 = absVal.args[1];
-    if (arg1 instanceof AbstractValue && arg1.args.length === 3) arg1 = this.specializeJoin(arg1, propName);
+    if (arg1 instanceof AbstractValue && arg1.args.length === 3)
+      arg1 = this.specializeJoin(arg1, propName);
     let arg2 = absVal.args[2];
-    if (arg2 instanceof AbstractValue && arg2.args.length === 3) arg2 = this.specializeJoin(arg2, propName);
-    return AbstractValue.createFromConditionalOp(this.$Realm, cond, arg1, arg2, absVal.expressionLocation);
+    if (arg2 instanceof AbstractValue && arg2.args.length === 3)
+      arg2 = this.specializeJoin(arg2, propName);
+    return AbstractValue.createFromConditionalOp(
+      this.$Realm,
+      cond,
+      arg1,
+      arg2,
+      absVal.expressionLocation
+    );
   }
 
   specializeCond(absVal: AbstractValue, propName: Value): AbstractValue {
     if (absVal.kind === "template for property name condition")
-      return AbstractValue.createFromBinaryOp(this.$Realm, "===", absVal.args[0], propName);
+      return AbstractValue.createFromBinaryOp(
+        this.$Realm,
+        "===",
+        absVal.args[0],
+        propName
+      );
     return absVal;
   }
 
@@ -567,7 +641,11 @@ export default class ObjectValue extends ConcreteValue {
     return OrdinarySet(this.$Realm, this, P, V, Receiver);
   }
 
-  $SetPartial(P: AbstractValue | PropertyKeyValue, V: Value, Receiver: Value): boolean {
+  $SetPartial(
+    P: AbstractValue | PropertyKeyValue,
+    V: Value,
+    Receiver: Value
+  ): boolean {
     if (!(P instanceof AbstractValue)) return this.$Set(P, V, Receiver);
 
     function createTemplate(realm: Realm, propName: AbstractValue) {
@@ -593,7 +671,7 @@ export default class ObjectValue extends ConcreteValue {
       prop = {
         descriptor: undefined,
         object: this,
-        key: "",
+        key: ""
       };
       this.unknownProperty = prop;
     } else {
@@ -606,13 +684,18 @@ export default class ObjectValue extends ConcreteValue {
       if (!(V instanceof UndefinedValue)) {
         // join V with undefined, using a property name test as the condition
         let cond = createTemplate(this.$Realm, P);
-        newVal = joinValuesAsConditional(this.$Realm, cond, V, this.$Realm.intrinsics.undefined);
+        newVal = joinValuesAsConditional(
+          this.$Realm,
+          cond,
+          V,
+          this.$Realm.intrinsics.undefined
+        );
       }
       prop.descriptor = {
         writable: true,
         enumerable: true,
         configurable: true,
-        value: newVal,
+        value: newVal
       };
     } else {
       // join V with current value of this.unknownProperty. I.e. weak update.
@@ -634,7 +717,12 @@ export default class ObjectValue extends ConcreteValue {
         oldVal = propertyBinding.descriptor.value;
         invariant(oldVal !== undefined); // otherwise this is not simple
       }
-      let cond = AbstractValue.createFromBinaryOp(this.$Realm, "===", P, new StringValue(this.$Realm, key));
+      let cond = AbstractValue.createFromBinaryOp(
+        this.$Realm,
+        "===",
+        P,
+        new StringValue(this.$Realm, key)
+      );
       let newVal = joinValuesAsConditional(this.$Realm, cond, V, oldVal);
       OrdinarySet(this.$Realm, this, key, newVal, Receiver);
     }

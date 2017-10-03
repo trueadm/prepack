@@ -45,7 +45,7 @@ export class Serializer {
       !!serializerOptions.logModules,
       !!serializerOptions.delayUnsupportedRequires
     );
-    this.functions = new Functions(this.realm, serializerOptions.additionalFunctions, this.modules.moduleTracer);
+    this.functions = new Functions(this.realm, serializerOptions.additionalFunctions, serializerOptions.reactComponents, this.modules.moduleTracer);
     if (serializerOptions.trace) this.realm.tracers.push(new LoggingTracer(this.realm));
 
     this.options = serializerOptions;
