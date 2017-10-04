@@ -1210,13 +1210,13 @@ export class ResidualHeapSerializer {
 
     if (val.$FunctionKind === 'classConstructor') {
       if (!isClassMethod) {
-        if (val.$Prototype) {
+        let hasSuperClass = !(val.$Prototype instanceof _index2.NativeFunctionValue);
+        if (hasSuperClass === true) {
           let proto = val.$Prototype;
           instance.classSuper = this.serializeValue(val.$Prototype);
+          this.serializedValues.add(val.properties.get('length').descriptor.value);
+          this.serializedValues.add(val.properties.get('name').descriptor.value);
         }
-        this.serializedValues.add(val.properties.get('length').descriptor.value);
-        this.serializedValues.add(val.properties.get('prototype').descriptor.value);
-        this.serializedValues.add(val.properties.get('name').descriptor.value);
         if (val.$HomeObject) {
           let theClass = val.$HomeObject;
           instance.classMethods = new Map();
@@ -1224,12 +1224,13 @@ export class ResidualHeapSerializer {
           for (let [key, value] of theClass.properties) {
             let methodValue = value.descriptor.value;
             // if the constructor is only a super(...args) call, skip it
-            if (key === 'constructor') {
+            if (key === 'constructor' && hasSuperClass === true) {
               if (methodValue.$ECMAScriptCode.body.length === 1 && methodValue.$ECMAScriptCode.body[0].expression.arguments.length === 1 && methodValue.$ECMAScriptCode.body[0].expression.arguments[0].type === 'SpreadElement') {
                 continue;
               }
             }
-            instance.classMethods.set(key, this._serializeValueFunction(value.descriptor.value, true));
+            this.serializedValues.add(methodValue);
+            instance.classMethods.set(key, this._serializeValueFunction(methodValue, true));
           }
         }
         undelay();
