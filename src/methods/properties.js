@@ -1017,9 +1017,6 @@ export function OrdinaryGetOwnProperty(realm: Realm, O: ObjectValue, P: Property
           // Hack
           let buildNode = ([node]) => t.memberExpression(node, pname, !t.isIdentifier(pname));
           let absVal = AbstractValue.createTemporalFromBuildFunction(realm, Value, [O], buildNode);
-          if (typeof absVal._buildNode !== 'function') {
-            absVal._buildNode = buildNode;
-          }
           return { configurabe: true, enumerable: true, value: absVal, writable: true };
         } else {
           invariant(P instanceof SymbolValue);

@@ -144,14 +144,7 @@ function EvaluateCall(
       let fun_args = ((nodes.slice(argStart): any): Array<BabelNodeExpression | BabelNodeSpreadElement>);
       return t.callExpression(callFunc, fun_args);
     };
-    let foo = AbstractValue.createTemporalFromBuildFunction(realm, Value, args, buildNode);
-    if (typeof foo._buildNode !== 'function') {
-      foo._buildNode = buildNode;
-      if (args[0].intrinsicName !== propName) {
-        thisArg = Value;
-      }
-    }
-    return foo;
+    return AbstractValue.createTemporalFromBuildFunction(realm, Value, args, buildNode);
   }
 
   if (func instanceof AbstractValue) {
