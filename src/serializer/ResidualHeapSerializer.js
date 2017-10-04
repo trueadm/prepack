@@ -1210,7 +1210,7 @@ export class ResidualHeapSerializer {
 
     if (val.$FunctionKind === 'classConstructor') {
       if (!isClassMethod) {
-        let hasSuperClass = !(val.$Prototype instanceof _index2.NativeFunctionValue);
+        let hasSuperClass = !(val.$Prototype instanceof NativeFunctionValue);
         if (hasSuperClass === true) {
           let proto = val.$Prototype;
           instance.classSuper = this.serializeValue(val.$Prototype);
