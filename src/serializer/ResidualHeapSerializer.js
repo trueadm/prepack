@@ -1211,25 +1211,31 @@ export class ResidualHeapSerializer {
     if (val.$FunctionKind === 'classConstructor') {
       if (!isClassMethod) {
         let hasSuperClass = !(val.$Prototype instanceof NativeFunctionValue);
-        if (hasSuperClass === true) {
-          let proto = val.$Prototype;
-          instance.classSuper = this.serializeValue(val.$Prototype);
-          this.serializedValues.add(val.properties.get('length').descriptor.value);
-          this.serializedValues.add(val.properties.get('name').descriptor.value);
-        }
         if (val.$HomeObject) {
+          this.serializedValues.add(val.$HomeObject);
+          if (hasSuperClass === true) {
+            this.serializedValues.add(val.$HomeObject.$Prototype);
+            instance.classSuper = this.serializeValue(val.$Prototype);
+          }
           let theClass = val.$HomeObject;
           instance.classMethods = new Map();
-          this.serializedValues.add(theClass.properties);
           for (let [key, value] of theClass.properties) {
             let methodValue = value.descriptor.value;
             // if the constructor is only a super(...args) call, skip it
-            if (key === 'constructor' && hasSuperClass === true) {
-              if (methodValue.$ECMAScriptCode.body.length === 1 && methodValue.$ECMAScriptCode.body[0].expression.arguments.length === 1 && methodValue.$ECMAScriptCode.body[0].expression.arguments[0].type === 'SpreadElement') {
+            if (key === 'constructor') {
+              if (hasSuperClass === true && methodValue.$ECMAScriptCode.body.length === 1 && methodValue.$ECMAScriptCode.body[0].expression.arguments.length === 1 && methodValue.$ECMAScriptCode.body[0].expression.arguments[0].type === 'SpreadElement') {
+                this.serializedValues.add(val.properties.get('name').descriptor.value);
                 continue;
               }
+              if (methodValue.$ECMAScriptCode.body.length === 0) {
+                if (hasSuperClass === true) {
+                  this.serializedValues.add(val.properties.get('name').descriptor.value);
+                }
+                continue;
+              }
+            } else {
+              this.serializedValues.add(methodValue);
             }
-            this.serializedValues.add(methodValue);
             instance.classMethods.set(key, this._serializeValueFunction(methodValue, true));
           }
         }
