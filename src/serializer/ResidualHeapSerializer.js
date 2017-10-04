@@ -1133,7 +1133,7 @@ export class ResidualHeapSerializer {
     }
   }
 
-  _serializeValueFunction(val: FunctionValue): void | BabelNodeExpression {
+  _serializeValueFunction(val: FunctionValue, isClassMethod: boolean): void | BabelNodeExpression {
     if (val instanceof BoundFunctionValue) {
       this._emitObjectProperties(val);
       return t.callExpression(
@@ -1162,6 +1162,8 @@ export class ResidualHeapSerializer {
     invariant(val instanceof ECMAScriptSourceFunctionValue);
     let serializedBindings = {};
     let instance: FunctionInstance = {
+      classMethods: null,
+      classSuper: null,
       serializedBindings,
       functionValue: val,
       scopeInstances: new Set()
@@ -1173,7 +1175,9 @@ export class ResidualHeapSerializer {
     let undelay = () => {
       if (--delayed === 0) {
         instance.insertionPoint = this.emitter.getBodyReference();
-        this.residualFunctions.addFunctionInstance(instance);
+        if (!isClassMethod) {
+          this.residualFunctions.addFunctionInstance(instance);
+        }
       }
     };
     for (let boundName in residualBindings) {
@@ -1204,9 +1208,32 @@ export class ResidualHeapSerializer {
       );
     }
 
-    undelay();
+    if (val.$FunctionKind === 'classConstructor') {
+      if (!isClassMethod) {
+        if (val.$Prototype) {
+          let proto = val.$Prototype;
+          instance.classSuper = this.serializeValue(val.$Prototype);
+        }
+        this.serializedValues.add(val.properties.get('length').descriptor.value);
+        this.serializedValues.add(val.properties.get('prototype').descriptor.value);
+        if (val.$HomeObject) {
+          let theClass = val.$HomeObject;
+          instance.classMethods = new Map();
+          this.serializedValues.add(theClass.properties);
+          for (let [key, value] of theClass.properties) {
+            instance.classMethods.set(key, this._serializeValueFunction(value.descriptor.value, true));
+          }
+        }
+        undelay();
+      }
+    } else {
+      undelay();
+      this._emitObjectProperties(val);
+    }
 
-    this._emitObjectProperties(val);
+    if (isClassMethod) {
+      return instance;
+    }
   }
 
   // Checks whether a property can be defined via simple assignment, or using object literal syntax.

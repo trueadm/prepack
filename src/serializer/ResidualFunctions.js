@@ -293,7 +293,7 @@ export class ResidualFunctions {
             else this.prelude.push(elem);
           };
         } else {
-          invariant(t.isCallExpression(funcNode)); // .bind call
+          invariant(t.isCallExpression(funcNode) || t.isClassExpression(funcNode)); // .bind call
           addToBody = elem => getFunctionBody(instance).push(elem);
         }
         let declaration = t.variableDeclaration("var", [t.variableDeclarator(funcId, funcNode)]);
@@ -346,38 +346,64 @@ export class ResidualFunctions {
         this.statistics.functionClones += normalInstances.length - 1;
 
         for (let instance of normalInstances) {
-          let { functionValue, serializedBindings, scopeInstances } = instance;
+          let { functionValue, serializedBindings, scopeInstances, classMethods, classSuper } = instance;
           let id = this.locationService.getLocation(functionValue);
           invariant(id !== undefined);
-          let funcParams = params.slice();
-          let funcNode = t.functionExpression(
-            null,
-            funcParams,
-            ((t.cloneDeep(funcBody): any): BabelNodeBlockStatement)
-          );
-          let scopeInitialization = [];
-          for (let scope of scopeInstances) {
-            scopeInitialization.push(
-              t.variableDeclaration("var", [t.variableDeclarator(t.identifier(scope.name), t.numericLiteral(scope.id))])
-            );
-            scopeInitialization = scopeInitialization.concat(this._getReferentializedScopeInitialization(scope));
-          }
-          funcNode.body.body = scopeInitialization.concat(funcNode.body.body);
+          let funcNode;
 
-          traverse(t.file(t.program([t.expressionStatement(funcNode)])), ClosureRefReplacer, null, {
-            serializedBindings,
-            modified,
-            requireReturns: this.requireReturns,
-            requireStatistics,
-            isRequire: this.modules.getIsRequire(funcParams, [functionValue]),
-          });
+          if (functionValue.$FunctionKind === 'classConstructor') {
+            funcNode = t.classExpression(null, classSuper, t.classBody(Array.from(classMethods.entries()).map(([key, instance]) => {
+              const {functionValue, serializedBindings} = instance;
+              const funcBody = functionValue.$ECMAScriptCode;
+              const funcParams = functionValue.$FormalParameters;
+              const funcNode = t.functionExpression(null, funcParams, funcBody);
+              const functionInfo = this.residualFunctionInfos.get(funcBody);
 
-          if (functionValue.$Strict) {
-            strictFunctionBodies.push(funcNode);
+              traverse(t.file(t.program([t.expressionStatement(funcNode)])), ClosureRefReplacer, null, {
+                serializedBindings: serializedBindings,
+                modified: functionInfo.modified,
+                requireReturns: this.requireReturns,
+                requireStatistics: requireStatistics,
+                isRequire: this.modules.getIsRequire(funcParams, [functionValue])
+              });
+
+              return t.classMethod(
+                key === 'constructor' ?'constructor' : 'method',
+                t.identifier(key),
+                funcParams,
+                funcBody
+              );
+            })), []);
           } else {
-            unstrictFunctionBodies.push(funcNode);
+            let funcParams = params.slice();
+            funcNode = t.functionExpression(
+              null,
+              funcParams,
+              ((t.cloneDeep(funcBody): any): BabelNodeBlockStatement)
+            );
+            let scopeInitialization = [];
+            for (let scope of scopeInstances) {
+              scopeInitialization.push(
+                t.variableDeclaration("var", [t.variableDeclarator(t.identifier(scope.name), t.numericLiteral(scope.id))])
+              );
+              scopeInitialization = scopeInitialization.concat(this._getReferentializedScopeInitialization(scope));
+            }
+            funcNode.body.body = scopeInitialization.concat(funcNode.body.body);
+  
+            traverse(t.file(t.program([t.expressionStatement(funcNode)])), ClosureRefReplacer, null, {
+              serializedBindings,
+              modified,
+              requireReturns: this.requireReturns,
+              requireStatistics,
+              isRequire: this.modules.getIsRequire(funcParams, [functionValue]),
+            });
+  
+            if (functionValue.$Strict) {
+              strictFunctionBodies.push(funcNode);
+            } else {
+              unstrictFunctionBodies.push(funcNode);
+            }
           }
-
           define(instance, id, funcNode);
         }
       } else {
