@@ -129,7 +129,6 @@ function InternalUpdatedProperty(realm: Realm, O: ObjectValue, P: PropertyKeyVal
     }
   } else {
     let descValue = desc.value || realm.intrinsics.undefined;
-    invariant(descValue instanceof Value);
     if (oldDesc === undefined) {
       // The property is being created
       if (O === realm.$GlobalObject) {
@@ -161,7 +160,7 @@ function InternalUpdatedProperty(realm: Realm, O: ObjectValue, P: PropertyKeyVal
           generator.emitPropertyAssignment(O, P, descValue);
         }
       } else {
-        generator.emitDefineProperty(O, P, desc, /*isDescChanged*/ true);
+        generator.emitDefineProperty(O, P, desc);
       }
     }
   }
@@ -173,12 +172,11 @@ function parentPermitsChildPropertyCreation(realm: Realm, O: ObjectValue, P: Pro
   let ownDescValue = !ownDesc
     ? realm.intrinsics.undefined
     : ownDesc.value === undefined ? realm.intrinsics.undefined : ownDesc.value;
-  invariant(ownDescValue instanceof Value);
 
   if (!ownDesc || ownDescValue.mightHaveBeenDeleted()) {
     // O might not object, so first ask its parent
     let parent = O.$GetPrototypeOf();
-    parent.throwIfNotConcrete(); //TODO #1016: deal with abstract parents
+    parent.throwIfNotConcrete(); //TODO: deal with abstract parents
     if (!(parent instanceof NullValue)) {
       if (!parentPermitsChildPropertyCreation(realm, parent, P)) return false;
     }
@@ -191,7 +189,7 @@ function parentPermitsChildPropertyCreation(realm: Realm, O: ObjectValue, P: Pro
   // O might have a property P and so might object
   if (IsDataDescriptor(realm, ownDesc)) {
     if (ownDesc.writable) {
-      // The grand parent does not object so it is OK that parent does not have P
+      // The grand parent does not object so it is OK parent does not have P
       // If parent does have P, it is also OK because it is a writable data property
       return true;
     }
@@ -213,13 +211,12 @@ export function OrdinarySet(realm: Realm, O: ObjectValue, P: PropertyKeyValue, V
   let ownDescValue = !ownDesc
     ? realm.intrinsics.undefined
     : ownDesc.value === undefined ? realm.intrinsics.undefined : ownDesc.value;
-  invariant(ownDescValue instanceof Value);
 
   // 3. If ownDesc is undefined (or might be), then
   if (!ownDesc || ownDescValue.mightHaveBeenDeleted()) {
     // a. Let parent be ? O.[[GetPrototypeOf]]().
     let parent = O.$GetPrototypeOf();
-    parent.throwIfNotConcrete(); //TODO #1016: deal with abstract parents
+    parent.throwIfNotConcrete(); //TODO: deal with abstract parents
 
     // b. If parent is not null, then
     if (!(parent instanceof NullValue)) {
@@ -272,7 +269,6 @@ export function OrdinarySet(realm: Realm, O: ObjectValue, P: PropertyKeyValue, V
     let existingDescValue = !existingDescriptor
       ? realm.intrinsics.undefined
       : existingDescriptor.value === undefined ? realm.intrinsics.undefined : existingDescriptor.value;
-    invariant(existingDescValue instanceof Value);
 
     // d. If existingDescriptor is not undefined, then
     if (existingDescriptor !== undefined) {
@@ -351,7 +347,7 @@ export function FromPropertyDescriptor(realm: Realm, Desc: ?Descriptor): Value {
   // 4. If Desc has a [[Value]] field, then
   let success = true;
   if ("value" in Desc) {
-    invariant(Desc.value instanceof Value);
+    invariant(Desc.value !== undefined);
     // a. Perform CreateDataProperty(obj, "value", Desc.[[Value]]).
     success = CreateDataProperty(realm, obj, "value", Desc.value) && success;
   }
@@ -646,11 +642,7 @@ export function ValidateAndApplyPropertyDescriptor(
       // ii. If the [[Writable]] field of current is false, then
       if (!current.writable) {
         // 1. Return false, if the [[Value]] field of Desc is present and SameValue(Desc.[[Value]], current.[[Value]]) is false.
-        let descValue = Desc.value || realm.intrinsics.undefined;
-        invariant(descValue instanceof Value);
-        let currentValue = current.value || realm.intrinsics.undefined;
-        invariant(currentValue instanceof Value);
-        if (Desc.value && !SameValuePartial(realm, descValue, currentValue)) {
+        if (Desc.value && !SameValuePartial(realm, Desc.value, current.value || realm.intrinsics.undefined)) {
           return false;
         }
       }
@@ -896,7 +888,6 @@ export function ArraySetLength(realm: Realm, A: ArrayValue, Desc: Descriptor): b
     // a. Return OrdinaryDefineOwnProperty(A, "length", Desc).
     return OrdinaryDefineOwnProperty(realm, A, "length", Desc);
   }
-  invariant(DescValue instanceof Value);
 
   // 2. Let newLenDesc be a copy of Desc.
   let newLenDesc = Object.assign({}, Desc);
@@ -927,7 +918,7 @@ export function ArraySetLength(realm: Realm, A: ArrayValue, Desc: Descriptor): b
 
   // 9. Let oldLen be oldLenDesc.[[Value]].
   let oldLen = oldLenDesc.value;
-  invariant(oldLen instanceof Value);
+  invariant(oldLen !== undefined);
   oldLen = oldLen.throwIfNotConcrete();
   invariant(oldLen instanceof NumberValue, "should be a number");
   oldLen = (oldLen.value: number);
@@ -1023,9 +1014,9 @@ export function OrdinaryGetOwnProperty(realm: Realm, O: ObjectValue, P: Property
           // In this case it is safe to defer the property access to runtime (at this point in time)
           invariant(realm.generator);
           let pname = realm.generator.getAsPropertyNameExpression(P);
-          // Hack
-          let buildNode = ([node]) => t.memberExpression(node, pname, !t.isIdentifier(pname));
-          let absVal = AbstractValue.createTemporalFromBuildFunction(realm, Value, [O], buildNode);
+          let absVal = AbstractValue.createTemporalFromBuildFunction(realm, Value, [O], ([node]) =>
+            t.memberExpression(node, pname, !t.isIdentifier(pname))
+          );
           return { configurabe: true, enumerable: true, value: absVal, writable: true };
         } else {
           invariant(P instanceof SymbolValue);
@@ -1122,7 +1113,7 @@ export function OrdinarySetPrototypeOf(realm: Realm, O: ObjectValue, V: ObjectVa
       return false;
     } else {
       // c. Else,
-      // TODO #1017 i. If the [[GetPrototypeOf]] internal method of p is not the ordinary object internal method defined in 9.1.1, let done be true.
+      // TODO i. If the [[GetPrototypeOf]] internal method of p is not the ordinary object internal method defined in 9.1.1, let done be true.
 
       // ii. Else, let p be the value of p's [[Prototype]] internal slot.
       p = p.$Prototype;
@@ -1188,10 +1179,8 @@ export function EnumerateObjectProperties(realm: Realm, O: ObjectValue) {
   return iterator;
 }
 
-export function ThrowIfMightHaveBeenDeleted(
-  value: void | Value | Array<Value> | Array<{ $Key: void | Value, $Value: void | Value }>
-): void {
-  if (!(value instanceof Value)) return;
+export function ThrowIfMightHaveBeenDeleted(value: void | Value): void {
+  if (value === undefined) return;
   if (!value.mightHaveBeenDeleted()) return;
   invariant(value instanceof AbstractValue); // real empty values should never get here
   AbstractValue.reportIntrospectionError(value);
