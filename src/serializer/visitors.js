@@ -14,22 +14,21 @@ import { FunctionValue } from "../values/index.js";
 import * as t from "babel-types";
 import type { BabelNodeExpression, BabelNodeCallExpression } from "babel-types";
 import { BabelTraversePath } from "babel-traverse";
-import type { TryQuery, FunctionInfo, Names, ResidualFunctionBinding } from "./types.js";
-import { convertExpressionToJSXIdentifier } from "../utils/jsx";
+import type { TryQuery, FunctionInfo, Names } from "./types.js";
 
 export type ClosureRefVisitorState = {
   tryQuery: TryQuery<*>,
   val: FunctionValue,
   functionInfo: FunctionInfo,
-  realm: Realm
+  realm: Realm,
 };
 
 export type ClosureRefReplacerState = {
-  residualFunctionBindings: Map<string, ResidualFunctionBinding>,
+  serializedBindings: any,
   modified: Names,
   requireReturns: Map<number | string, BabelNodeExpression>,
   requireStatistics: { replaced: 0, count: 0 },
-  isRequire: void | ((scope: any, node: BabelNodeCallExpression) => boolean)
+  isRequire: void | ((scope: any, node: BabelNodeCallExpression) => boolean),
 };
 
 function markVisited(node, data) {
@@ -48,35 +47,23 @@ function shouldVisit(node, data) {
 //       they will be visited again and possibly transformed.
 //       If necessary we could implement this by following node.parentPath and checking
 //       if any parent nodes are marked visited, but that seem unnecessary right now.let closureRefReplacer = {
-function replaceName(path, residualFunctionBinding, name, data) {
+function replaceName(path, serializedBinding, name, data) {
   if (path.scope.hasBinding(name, /*noGlobals*/ true)) return;
 
-  if (residualFunctionBinding && shouldVisit(path.node, data)) {
-    markVisited(residualFunctionBinding.serializedValue, data);
-    var serializedValue = residualFunctionBinding.serializedValue;
-
-    if (
-      path.node.type === "JSXIdentifier" ||
-      path.node.type === "JSXMemberIdentifier"
-    ) {
-      path.replaceWith(convertExpressionToJSXIdentifier(serializedValue));
-    } else {
-      path.replaceWith(residualFunctionBinding.serializedValue);
-    }
+  if (serializedBinding && shouldVisit(path.node, data)) {
+    markVisited(serializedBinding.serializedValue, data);
+    path.replaceWith(serializedBinding.serializedValue);
   }
 }
 
 export let ClosureRefReplacer = {
-  ReferencedIdentifier(
-    path: BabelTraversePath,
-    state: ClosureRefReplacerState
-  ) {
+  ReferencedIdentifier(path: BabelTraversePath, state: ClosureRefReplacerState) {
     if (ignorePath(path)) return;
 
-    let residualFunctionBindings = state.residualFunctionBindings;
+    let serializedBindings = state.serializedBindings;
     let name = path.node.name;
-    let residualFunctionBinding = residualFunctionBindings.get(name);
-    if (residualFunctionBinding) replaceName(path, residualFunctionBinding, name, residualFunctionBindings);
+    let serializedBinding = serializedBindings[name];
+    if (serializedBinding) replaceName(path, serializedBinding, name, serializedBindings);
   },
 
   CallExpression(path: BabelTraversePath, state: ClosureRefReplacerState) {
@@ -90,23 +77,23 @@ export let ClosureRefReplacer = {
     let moduleId = "" + path.node.arguments[0].value;
     let new_node = requireReturns.get(moduleId);
     if (new_node !== undefined) {
-      markVisited(new_node, state.residualFunctionBindings);
+      markVisited(new_node, state.serializedBindings);
       path.replaceWith(new_node);
       state.requireStatistics.replaced++;
     }
   },
 
   "AssignmentExpression|UpdateExpression"(path: BabelTraversePath, state: ClosureRefReplacerState) {
-    let residualFunctionBindings = state.residualFunctionBindings;
+    let serializedBindings = state.serializedBindings;
     let ids = path.getBindingIdentifierPaths();
     for (let name in ids) {
-      let residualFunctionBinding = residualFunctionBindings.get(name);
-      if (residualFunctionBinding) {
+      let serializedBinding = serializedBindings[name];
+      if (serializedBinding) {
         let nestedPath = ids[name];
-        replaceName(nestedPath, residualFunctionBinding, name, residualFunctionBindings);
+        replaceName(nestedPath, serializedBinding, name, serializedBindings);
       }
     }
-  }
+  },
 };
 
 function visitName(path, state, name, modified) {
@@ -120,11 +107,7 @@ function visitName(path, state, name, modified) {
 
 function ignorePath(path: BabelTraversePath) {
   let parent = path.parent;
-  return (
-    t.isLabeledStatement(parent) ||
-    t.isBreakStatement(parent) ||
-    t.isContinueStatement(parent)
-  );
+  return t.isLabeledStatement(parent) || t.isBreakStatement(parent) || t.isContinueStatement(parent);
 }
 
 // TODO #886: doesn't check that `arguments` and `this` is in top function
@@ -144,12 +127,9 @@ export let ClosureRefVisitor = {
     state.functionInfo.usesThis = true;
   },
 
-  "AssignmentExpression|UpdateExpression"(
-    path: BabelTraversePath,
-    state: ClosureRefVisitorState
-  ) {
+  "AssignmentExpression|UpdateExpression"(path: BabelTraversePath, state: ClosureRefVisitorState) {
     for (let name in path.getBindingIdentifiers()) {
       visitName(path, state, name, true);
     }
-  }
+  },
 };

@@ -35,7 +35,7 @@ import { Generator } from "../utils/generator.js";
 import type { GeneratorEntry, VisitEntryCallbacks } from "../utils/generator.js";
 import traverse from "babel-traverse";
 import invariant from "../invariant.js";
-import type { ResidualFunctionBinding, FunctionInfo, FunctionInstance } from "./types.js";
+import type { VisitedBinding, VisitedBindings, FunctionInfo } from "./types.js";
 import { ClosureRefVisitor } from "./visitors.js";
 import { Logger } from "./logger.js";
 import { Modules } from "./modules.js";
@@ -65,7 +65,7 @@ export class ResidualHeapVisitor {
     this.declarativeEnvironmentRecordsBindings = new Map();
     this.globalBindings = new Map();
     this.functionInfos = new Map();
-    this.functionInstances = new Map();
+    this.functionBindings = new Map();
     this.values = new Map();
     let generator = this.realm.generator;
     invariant(generator);
@@ -81,11 +81,10 @@ export class ResidualHeapVisitor {
   logger: Logger;
   modules: Modules;
 
-  // Caches that ensure one ResidualFunctionBinding exists per (record, name) pair
-  declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>;
-  globalBindings: Map<string, ResidualFunctionBinding>;
-
+  declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, VisitedBindings>;
+  globalBindings: Map<string, VisitedBinding>;
   functionInfos: Map<BabelNodeBlockStatement, FunctionInfo>;
+  functionBindings: Map<FunctionValue, VisitedBindings>;
   scope: Scope;
   // Either the realm's generator or the FunctionValue of an additional function to serialize
   commonScope: Scope;
@@ -94,7 +93,6 @@ export class ResidualHeapVisitor {
   referencedDeclaredValues: Set<AbstractValue>;
   delayedVisitGeneratorEntries: Array<{| commonScope: Scope, generator: Generator, entry: GeneratorEntry |}>;
   additionalFunctionValuesAndEffects: Map<FunctionValue, Effects>;
-  functionInstances: Map<FunctionValue, FunctionInstance>;
   equivalenceSet: HashSet<AbstractValue>;
 
   _withScope(scope: Scope, f: () => void) {
@@ -192,30 +190,29 @@ export class ResidualHeapVisitor {
   }
 
   visitDescriptor(desc: Descriptor): void {
-    invariant(desc.value === undefined || desc.value instanceof Value);
     if (desc.value !== undefined) desc.value = this.visitEquivalentValue(desc.value);
     if (desc.get !== undefined) this.visitValue(desc.get);
     if (desc.set !== undefined) this.visitValue(desc.set);
   }
 
-  visitDeclarativeEnvironmentRecordBinding(r: DeclarativeEnvironmentRecord, n: string): ResidualFunctionBinding {
-    let residualFunctionBindings = this.declarativeEnvironmentRecordsBindings.get(r);
-    if (!residualFunctionBindings) {
-      residualFunctionBindings = new Map();
-      this.declarativeEnvironmentRecordsBindings.set(r, residualFunctionBindings);
+  visitDeclarativeEnvironmentRecordBinding(r: DeclarativeEnvironmentRecord, n: string): VisitedBinding {
+    let visitedBindings = this.declarativeEnvironmentRecordsBindings.get(r);
+    if (!visitedBindings) {
+      visitedBindings = (Object.create(null): any);
+      this.declarativeEnvironmentRecordsBindings.set(r, visitedBindings);
     }
-    let residualFunctionBinding = residualFunctionBindings.get(n);
-    if (!residualFunctionBinding) {
+    let visitedBinding: ?VisitedBinding = visitedBindings[n];
+    if (!visitedBinding) {
       let realm = this.realm;
       let binding = r.bindings[n];
       invariant(!binding.deletable);
       let value = (binding.initialized && binding.value) || realm.intrinsics.undefined;
-      residualFunctionBinding = { value, modified: false, declarativeEnvironmentRecord: r };
-      residualFunctionBindings.set(n, residualFunctionBinding);
+      visitedBinding = { value, modified: false, declarativeEnvironmentRecord: r };
+      visitedBindings[n] = visitedBinding;
     }
-    invariant(residualFunctionBinding.value !== undefined);
-    residualFunctionBinding.value = this.visitEquivalentValue(residualFunctionBinding.value);
-    return residualFunctionBinding;
+    invariant(visitedBinding.value !== undefined);
+    visitedBinding.value = this.visitEquivalentValue(visitedBinding.value);
+    return visitedBinding;
   }
 
   visitValueArray(val: ObjectValue): void {
@@ -330,11 +327,11 @@ export class ResidualHeapVisitor {
       }
     }
 
-    let residualFunctionBindings = new Map();
+    let visitedBindings = (Object.create(null): any);
     this._withScope(val, () => {
       invariant(functionInfo);
       for (let innerName in functionInfo.unbound) {
-        let residualFunctionBinding;
+        let visitedBinding;
         let doesNotMatter = true;
         let reference = this.logger.tryQuery(
           () => ResolveBinding(this.realm, innerName, doesNotMatter, val.$Environment),
@@ -346,7 +343,7 @@ export class ResidualHeapVisitor {
           IsUnresolvableReference(this.realm, reference) ||
           reference.base instanceof GlobalEnvironmentRecord
         ) {
-          residualFunctionBinding = this.visitGlobalBinding(innerName);
+          visitedBinding = this.visitGlobalBinding(innerName);
         } else {
           invariant(!IsUnresolvableReference(this.realm, reference));
           let referencedBase = reference.base;
@@ -355,18 +352,14 @@ export class ResidualHeapVisitor {
             throw new FatalError("TODO: do not know how to visit reference with symbol");
           }
           invariant(referencedBase instanceof DeclarativeEnvironmentRecord);
-          residualFunctionBinding = this.visitDeclarativeEnvironmentRecordBinding(referencedBase, referencedName);
+          visitedBinding = this.visitDeclarativeEnvironmentRecordBinding(referencedBase, referencedName);
         }
-        residualFunctionBindings.set(innerName, residualFunctionBinding);
-        if (functionInfo.modified[innerName]) residualFunctionBinding.modified = true;
+        visitedBindings[innerName] = visitedBinding;
+        if (functionInfo.modified[innerName]) visitedBinding.modified = true;
       }
     });
 
-    this.functionInstances.set(val, {
-      residualFunctionBindings,
-      functionValue: val,
-      scopeInstances: new Set(),
-    });
+    this.functionBindings.set(val, visitedBindings);
   }
 
   visitValueObject(val: ObjectValue): void {
@@ -388,7 +381,6 @@ export class ResidualHeapVisitor {
       case "String":
       case "Boolean":
       case "ArrayBuffer":
-      case "ReactElement":
         return;
       case "Date":
         let dateValue = val.$DateValue;
@@ -503,11 +495,11 @@ export class ResidualHeapVisitor {
     }
   }
 
-  visitGlobalBinding(key: string): ResidualFunctionBinding {
+  visitGlobalBinding(key: string): VisitedBinding {
     let binding = this.globalBindings.get(key);
     if (!binding) {
       let value = this.realm.getGlobalLetBinding(key);
-      binding = ({ value, modified: true, declarativeEnvironmentRecord: null }: ResidualFunctionBinding);
+      binding = ({ value, modified: true }: VisitedBinding);
       this.globalBindings.set(key, binding);
     }
     if (binding.value) binding.value = this.visitEquivalentValue(binding.value);
@@ -579,7 +571,6 @@ export class ResidualHeapVisitor {
           if (object.intrinsicName === "global") continue; // Avoid double-counting
           this.visitObjectProperty(binding);
         }
-        // TODO #990: Fix additional functions handing of ModifiedBindings
       };
       this.visitGenerator(generator);
       this._withScope(generator, visitPropertiesAndBindings);

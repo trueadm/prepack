@@ -20,7 +20,7 @@ import invariant from "../invariant.js";
 export type TryQuery<T> = (f: () => T, defaultValue: T, logFailures: boolean) => T;
 
 export type FunctionInstance = {
-  residualFunctionBindings: Map<string, ResidualFunctionBinding>,
+  serializedBindings: SerializedBindings,
   functionValue: ECMAScriptSourceFunctionValue,
   insertionPoint?: BodyReference,
   // Optional place to put the function declaration
@@ -36,15 +36,22 @@ export type FunctionInfo = {
   usesThis: boolean,
 };
 
-export type ResidualFunctionBinding = {
+export type SerializedBindings = { [key: string]: SerializedBinding };
+export type SerializedBinding = {
+  value: void | Value,
+  // The serializedValue is only not yet present during the initialization of a binding that involves recursive dependencies.
+  serializedValue: void | BabelNodeExpression,
+  referentialized: boolean,
+  modified: boolean,
+  declarativeEnvironmentRecord?: DeclarativeEnvironmentRecord,
+  scope?: ScopeBinding,
+};
+
+export type VisitedBindings = { [key: string]: VisitedBinding }; //todo: use a map
+export type VisitedBinding = {
   value: void | Value,
   modified: boolean,
-  // void means a global binding
-  declarativeEnvironmentRecord: null | DeclarativeEnvironmentRecord,
-  // The serializedValue is only not yet present during the initialization of a binding that involves recursive dependencies.
-  serializedValue?: void | BabelNodeExpression,
-  referentialized?: boolean,
-  scope?: ScopeBinding,
+  declarativeEnvironmentRecord?: DeclarativeEnvironmentRecord,
 };
 
 export type ScopeBinding = {
@@ -56,7 +63,7 @@ export type ScopeBinding = {
 
 export type GeneratorBody = Array<BabelNodeStatement>;
 
-export function AreSameResidualBinding(realm: Realm, x: ResidualFunctionBinding, y: ResidualFunctionBinding) {
+export function AreSameSerializedBindings(realm: Realm, x: SerializedBinding, y: SerializedBinding) {
   if (x.serializedValue === y.serializedValue) return true;
   if (x.value && x.value === y.value) return true;
   if (x.value instanceof ConcreteValue && y.value instanceof ConcreteValue) {

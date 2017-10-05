@@ -159,7 +159,6 @@ export class ResidualHeapInspector {
     if (prototypeBinding === undefined) return undefined;
     let prototypeDesc = prototypeBinding.descriptor;
     if (prototypeDesc === undefined) return undefined;
-    invariant(prototypeDesc.value === undefined || prototypeDesc.value instanceof Value);
     return prototypeDesc.value;
   }
 
