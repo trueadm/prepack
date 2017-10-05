@@ -64,7 +64,7 @@ export default class ObjectValue extends ConcreteValue {
   ) {
     super(realm, intrinsicName);
     realm.recordNewObject(this);
-    if (realm.useAbstractInterpretation) this.setupBindings();
+    if (realm.useAbstractInterpretation) this.setupBindings(this.getTrackedPropertyNames());
     this.$Prototype = proto || realm.intrinsics.null;
     this.$Extensible = realm.intrinsics.true;
     this._isPartial = realm.intrinsics.false;
@@ -74,25 +74,33 @@ export default class ObjectValue extends ConcreteValue {
     this.refuseSerialization = refuseSerialization;
   }
 
-  static trackedProperties = [
-    "$Prototype",
-    "$Extensible",
-    "$SetNextIndex",
-    "$IteratedSet",
-    "$MapNextIndex",
-    "$MapData",
-    "$Map",
-    "$DateValue",
-    "$ArrayIteratorNextIndex",
-    "$IteratedObject",
-    "$StringIteratorNextIndex",
-    "$IteratedString",
+  static trackedPropertyNames = [
     "_isPartial",
-    "_isSimple"
+    "_isSimple",
+    "$ArrayIteratorNextIndex",
+    "$DateValue",
+    "$Extensible",
+    "$IteratedList",
+    "$IteratedObject",
+    "$IteratedSet",
+    "$IteratedString",
+    "$Map",
+    "$MapData",
+    "$MapNextIndex",
+    "$Prototype",
+    "$SetData",
+    "$SetNextIndex",
+    "$StringIteratorNextIndex",
+    "$WeakMapData",
+    "$WeakSetData",
   ];
 
-  setupBindings() {
-    for (let propName of ObjectValue.trackedProperties) {
+  getTrackedPropertyNames(): Array<string> {
+    return ObjectValue.trackedPropertyNames;
+  }
+
+  setupBindings(propertyNames: Array<string>) {
+    for (let propName of propertyNames) {
       let desc = { writeable: true, value: undefined };
       (this: any)[propName + "_binding"] = {
         descriptor: desc,
@@ -102,8 +110,8 @@ export default class ObjectValue extends ConcreteValue {
     }
   }
 
-  static setupTrackedPropertyAccessors() {
-    for (let propName of ObjectValue.trackedProperties) {
+  static setupTrackedPropertyAccessors(propertyNames: Array<string>) {
+    for (let propName of propertyNames) {
       Object.defineProperty(ObjectValue.prototype, propName, {
         configurable: true,
         get: function() {
@@ -246,7 +254,7 @@ export default class ObjectValue extends ConcreteValue {
   hashValue: void | number;
 
   equals(x: Value): boolean {
-    return x instanceof ObjectValue && this.hashValue === x.hashValue;
+    return x instanceof ObjectValue && this.getHash() === x.getHash();
   }
 
   getHash(): number {
@@ -329,7 +337,7 @@ export default class ObjectValue extends ConcreteValue {
     if (this.$WeakSetData !== undefined) return "WeakSet";
     if (this.$TypedArrayName !== undefined) return this.$TypedArrayName;
     if (this.properties.has("$$typeof") === true) return "ReactElement";
-    // TODO #26: Promises. All kinds of iterators. Generators.
+    // TODO #26 #712: Promises. All kinds of iterators. Generators.
     return "Object";
   }
 
@@ -362,11 +370,8 @@ export default class ObjectValue extends ConcreteValue {
     );
   }
 
-  defineNativeProperty(
-    name: SymbolValue | string,
-    value?: Value,
-    desc?: Descriptor = {}
-  ) {
+  defineNativeProperty(name: SymbolValue | string, value?: Value | Array<Value>, desc?: Descriptor = {}) {
+    invariant(!value || value instanceof Value);
     this.$DefineOwnProperty(name, {
       value,
       writable: true,
@@ -412,11 +417,8 @@ export default class ObjectValue extends ConcreteValue {
     });
   }
 
-  defineNativeConstant(
-    name: SymbolValue | string,
-    value?: Value,
-    desc?: Descriptor = {}
-  ) {
+  defineNativeConstant(name: SymbolValue | string, value?: Value | Array<Value>, desc?: Descriptor = {}) {
+    invariant(!value || value instanceof Value);
     this.$DefineOwnProperty(name, {
       value,
       writable: false,
@@ -438,6 +440,7 @@ export default class ObjectValue extends ConcreteValue {
       if (!pb || pb.descriptor === undefined) return false;
       let pv = pb.descriptor.value;
       if (pv === undefined) return true;
+      invariant(pv instanceof Value);
       if (!pv.mightHaveBeenDeleted()) return true;
       // The property may or may not be there at runtime.
       // We can at best return an abstract keys array.
@@ -463,6 +466,7 @@ export default class ObjectValue extends ConcreteValue {
       };
       if (desc.value) {
         serializedDesc.writable = desc.writable;
+        invariant(desc.value instanceof Value);
         serializedDesc.value = desc.value.serialize(stack);
       } else {
         invariant(desc.get !== undefined);
@@ -558,7 +562,7 @@ export default class ObjectValue extends ConcreteValue {
     if (!(P instanceof AbstractValue)) return this.$Get(P, Receiver);
     // We assume that simple objects have no getter/setter properties.
     if (this !== Receiver || !this.isSimpleObject() || P.mightNotBeString()) {
-      AbstractValue.reportIntrospectionError(P, "TODO");
+      AbstractValue.reportIntrospectionError(P, "TODO: #1021");
       throw new FatalError();
     }
     // If all else fails, use this expression
@@ -591,6 +595,7 @@ export default class ObjectValue extends ConcreteValue {
       if (desc === undefined) continue; // deleted
       invariant(desc.value !== undefined); // otherwise this is not simple
       let val = desc.value;
+      invariant(val instanceof Value);
       let cond = AbstractValue.createFromBinaryOp(
         this.$Realm,
         "===",
@@ -604,7 +609,7 @@ export default class ObjectValue extends ConcreteValue {
     return result;
   }
 
-  specializeJoin(absVal: AbstractValue, propName: Value): AbstractValue {
+  specializeJoin(absVal: AbstractValue, propName: Value): Value {
     invariant(absVal.args.length === 3 && absVal.kind === "conditional");
     let generic_cond = absVal.args[0];
     invariant(generic_cond instanceof AbstractValue);
@@ -662,7 +667,7 @@ export default class ObjectValue extends ConcreteValue {
     // We assume that simple objects have no getter/setter properties and
     // that all properties are writable.
     if (this !== Receiver || !this.isSimpleObject() || P.mightNotBeString()) {
-      AbstractValue.reportIntrospectionError(P, "TODO");
+      AbstractValue.reportIntrospectionError(P, "TODO #1021");
       throw new FatalError();
     }
 
@@ -700,7 +705,7 @@ export default class ObjectValue extends ConcreteValue {
     } else {
       // join V with current value of this.unknownProperty. I.e. weak update.
       let oldVal = desc.value;
-      invariant(oldVal !== undefined);
+      invariant(oldVal instanceof Value);
       let newVal = oldVal;
       if (!(V instanceof UndefinedValue)) {
         let cond = createTemplate(this.$Realm, P);
@@ -715,7 +720,7 @@ export default class ObjectValue extends ConcreteValue {
       let oldVal = this.$Realm.intrinsics.empty;
       if (propertyBinding.descriptor && propertyBinding.descriptor.value) {
         oldVal = propertyBinding.descriptor.value;
-        invariant(oldVal !== undefined); // otherwise this is not simple
+        invariant(oldVal instanceof Value); // otherwise this is not simple
       }
       let cond = AbstractValue.createFromBinaryOp(
         this.$Realm,
@@ -733,7 +738,7 @@ export default class ObjectValue extends ConcreteValue {
   // ECMA262 9.1.10
   $Delete(P: PropertyKeyValue): boolean {
     if (this.unknownProperty !== undefined) {
-      // TODO: generate a delete from the object
+      // TODO #946: generate a delete from the object
       AbstractValue.reportIntrospectionError(this, P);
       throw new FatalError();
     }

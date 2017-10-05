@@ -14,7 +14,7 @@ import { FunctionValue } from "../values/index.js";
 import * as t from "babel-types";
 import type { BabelNodeExpression, BabelNodeCallExpression } from "babel-types";
 import { BabelTraversePath } from "babel-traverse";
-import type { TryQuery, FunctionInfo, Names } from "./types.js";
+import type { TryQuery, FunctionInfo, Names, ResidualFunctionBinding } from "./types.js";
 import { convertExpressionToJSXIdentifier } from "../utils/jsx";
 
 export type ClosureRefVisitorState = {
@@ -25,7 +25,7 @@ export type ClosureRefVisitorState = {
 };
 
 export type ClosureRefReplacerState = {
-  serializedBindings: any,
+  residualFunctionBindings: Map<string, ResidualFunctionBinding>,
   modified: Names,
   requireReturns: Map<number | string, BabelNodeExpression>,
   requireStatistics: { replaced: 0, count: 0 },
@@ -48,12 +48,12 @@ function shouldVisit(node, data) {
 //       they will be visited again and possibly transformed.
 //       If necessary we could implement this by following node.parentPath and checking
 //       if any parent nodes are marked visited, but that seem unnecessary right now.let closureRefReplacer = {
-function replaceName(path, serializedBinding, name, data) {
+function replaceName(path, residualFunctionBinding, name, data) {
   if (path.scope.hasBinding(name, /*noGlobals*/ true)) return;
 
-  if (serializedBinding && shouldVisit(path.node, data)) {
-    markVisited(serializedBinding.serializedValue, data);
-    var serializedValue = serializedBinding.serializedValue;
+  if (residualFunctionBinding && shouldVisit(path.node, data)) {
+    markVisited(residualFunctionBinding.serializedValue, data);
+    var serializedValue = residualFunctionBinding.serializedValue;
 
     if (
       path.node.type === "JSXIdentifier" ||
@@ -61,7 +61,7 @@ function replaceName(path, serializedBinding, name, data) {
     ) {
       path.replaceWith(convertExpressionToJSXIdentifier(serializedValue));
     } else {
-      path.replaceWith(serializedBinding.serializedValue);
+      path.replaceWith(residualFunctionBinding.serializedValue);
     }
   }
 }
@@ -73,11 +73,10 @@ export let ClosureRefReplacer = {
   ) {
     if (ignorePath(path)) return;
 
-    let serializedBindings = state.serializedBindings;
+    let residualFunctionBindings = state.residualFunctionBindings;
     let name = path.node.name;
-    let serializedBinding = serializedBindings[name];
-    if (serializedBinding)
-      replaceName(path, serializedBinding, name, serializedBindings);
+    let residualFunctionBinding = residualFunctionBindings.get(name);
+    if (residualFunctionBinding) replaceName(path, residualFunctionBinding, name, residualFunctionBindings);
   },
 
   CallExpression(path: BabelTraversePath, state: ClosureRefReplacerState) {
@@ -91,23 +90,20 @@ export let ClosureRefReplacer = {
     let moduleId = "" + path.node.arguments[0].value;
     let new_node = requireReturns.get(moduleId);
     if (new_node !== undefined) {
-      markVisited(new_node, state.serializedBindings);
+      markVisited(new_node, state.residualFunctionBindings);
       path.replaceWith(new_node);
       state.requireStatistics.replaced++;
     }
   },
 
-  "AssignmentExpression|UpdateExpression"(
-    path: BabelTraversePath,
-    state: ClosureRefReplacerState
-  ) {
-    let serializedBindings = state.serializedBindings;
+  "AssignmentExpression|UpdateExpression"(path: BabelTraversePath, state: ClosureRefReplacerState) {
+    let residualFunctionBindings = state.residualFunctionBindings;
     let ids = path.getBindingIdentifierPaths();
     for (let name in ids) {
-      let serializedBinding = serializedBindings[name];
-      if (serializedBinding) {
+      let residualFunctionBinding = residualFunctionBindings.get(name);
+      if (residualFunctionBinding) {
         let nestedPath = ids[name];
-        replaceName(nestedPath, serializedBinding, name, serializedBindings);
+        replaceName(nestedPath, residualFunctionBinding, name, residualFunctionBindings);
       }
     }
   }
