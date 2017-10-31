@@ -16,17 +16,10 @@ import invariant from "../invariant.js";
 import { type Effects, type PropertyBindings, Realm } from "../realm.js";
 import type { PropertyBinding } from "../types.js";
 import { ignoreErrorsIn } from "../utils/errors.js";
-import {
-  AbstractObjectValue,
-  ECMAScriptSourceFunctionValue,
-  FunctionValue,
-  ObjectValue,
-  AbstractValue,
-} from "../values/index.js";
+import { AbstractObjectValue, FunctionValue, ObjectValue, AbstractValue } from "../values/index.js";
 import { Get } from "../methods/index.js";
 import { ModuleTracer } from "./modules.js";
 import buildTemplate from "babel-template";
-import Reconciler from "../react/Reconciler.js";
 import { ReactStatistics, type ReactSerializerState } from "./types";
 import * as t from "babel-types";
 
@@ -111,17 +104,7 @@ export class Functions {
   }
 
   checkReactRootComponents(statistics: ReactStatistics, react: ReactSerializerState): void {
-    let recordedReactRootComponents = this.__generateAdditionalFunctions("__reactComponentRoots");
-
-    // Get write effects of the components
-    for (let [funcValue] of recordedReactRootComponents) {
-      let reconciler = new Reconciler(this.realm, this.moduleTracer, statistics, react);
-      invariant(
-        funcValue instanceof ECMAScriptSourceFunctionValue,
-        "only ECMAScriptSourceFunctionValue function values are supported as React root components"
-      );
-      this.writeEffects.set(funcValue, reconciler.render(funcValue));
-    }
+    throw new FatalError("TODO: implement functional component folding");
   }
 
   _generateAdditionalFunctionCallsFromDirective(): Array<[FunctionValue, BabelNodeCallExpression]> {

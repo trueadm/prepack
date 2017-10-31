@@ -10,7 +10,6 @@
 /* @flow */
 
 import * as t from "babel-types";
-import { Realm } from "../realm.js";
 import type {
   BabelNodeExpression,
   BabelNodeArrayExpression,
@@ -21,7 +20,6 @@ import type {
   BabelNodeMemberExpression,
 } from "babel-types";
 import invariant from "../invariant.js";
-import { IsAccessorDescriptor } from "../methods/index.js";
 import { isReactComponent, getUniqueReactElementKey } from "./utils";
 
 export function convertExpressionToJSXIdentifier(
@@ -132,24 +130,4 @@ export function applyKeysToNestedArray(
       }
     }
   }
-}
-
-export function getJSXPropertyValue(realm: Realm, properties: Map<string, any>, key: string) {
-  if (properties.has(key)) {
-    let val = properties.get(key);
-
-    if (val !== undefined) {
-      let descriptor = val.descriptor;
-      invariant(!IsAccessorDescriptor(realm, descriptor), "expected descriptor to be a non-accessor property");
-
-      if (descriptor !== undefined) {
-        let descriptorValue = descriptor.value;
-
-        if (descriptorValue !== undefined) {
-          return descriptorValue;
-        }
-      }
-    }
-  }
-  return null;
 }

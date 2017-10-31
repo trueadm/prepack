@@ -33,7 +33,6 @@ import {
   convertExpressionToJSXIdentifier,
   convertKeyValueToJSXAttribute,
   applyKeysToNestedArray,
-  getJSXPropertyValue,
 } from "../react/jsx.js";
 import { isReactElement } from "../react/utils.js";
 import * as t from "babel-types";
@@ -761,11 +760,10 @@ export class ResidualHeapSerializer {
   }
 
   _serializeValueReactElement(val: ObjectValue): BabelNodeExpression {
-    let objectProperties: Map<string, any> = val.properties;
-    let typeValue = getJSXPropertyValue(this.realm, objectProperties, "type");
-    let keyValue = getJSXPropertyValue(this.realm, objectProperties, "key");
-    let refValue = getJSXPropertyValue(this.realm, objectProperties, "ref");
-    let propsValue = getJSXPropertyValue(this.realm, objectProperties, "props");
+    let typeValue = Get(this.realm, val, "type");
+    let keyValue = Get(this.realm, val, "key");
+    let refValue = Get(this.realm, val, "ref");
+    let propsValue = Get(this.realm, val, "props");
 
     invariant(typeValue !== null, "JSXElement type of null");
 
@@ -803,12 +801,12 @@ export class ResidualHeapSerializer {
           let childrenValue = desc.value;
           if (childrenValue instanceof ArrayValue) {
             this.serializedValues.add(childrenValue);
-            let childrenLength = getJSXPropertyValue(this.realm, childrenValue.properties, "length");
+            let childrenLength = Get(this.realm, childrenValue, "length");
             let childrenLengthValue = 0;
             if (childrenLength instanceof NumberValue) {
               childrenLengthValue = childrenLength.value;
               for (let i = 0; i < childrenLengthValue; i++) {
-                let child = getJSXPropertyValue(this.realm, childrenValue.properties, "" + i);
+                let child = Get(this.realm, childrenValue, "" + i);
                 if (child instanceof Value) {
                   children.push(this._serializeValueReactElementChild(child));
                 } else {
