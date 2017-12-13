@@ -29,7 +29,7 @@ import { LexicalEnvironment, Reference, GlobalEnvironmentRecord } from "./enviro
 import type { Binding } from "./environment.js";
 import { cloneDescriptor, Construct } from "./methods/index.js";
 import { Completion, ThrowCompletion, AbruptCompletion, PossiblyNormalCompletion } from "./completions.js";
-import type { Compatibility, RealmOptions } from "./options.js";
+import type { Compatibility, RealmOptions, ReactOutputTypes } from "./options.js";
 import invariant from "./invariant.js";
 import seedrandom from "seedrandom";
 import { Generator, PreludeGenerator } from "./utils/generator.js";
@@ -173,6 +173,7 @@ export class Realm {
 
     this.react = {
       enabled: opts.reactEnabled || false,
+      output: opts.reactOutput || "create-element",
       flowRequired: true,
       reactElementSymbol: undefined,
       currentOwner: undefined,
@@ -213,6 +214,7 @@ export class Realm {
 
   react: {
     enabled: boolean,
+    output?: ReactOutputTypes,
     flowRequired: boolean,
     reactElementSymbol?: SymbolValue,
     currentOwner?: ObjectValue,
