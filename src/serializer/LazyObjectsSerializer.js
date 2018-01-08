@@ -28,6 +28,7 @@ import type {
   ClassMethodInstance,
   AdditionalFunctionEffects,
   ResidualFunctionBinding,
+  ReactBytecodeEffects,
 } from "./types.js";
 import type { SerializerOptions } from "../options.js";
 import invariant from "../invariant.js";
@@ -68,6 +69,7 @@ export class LazyObjectsSerializer extends ResidualHeapSerializer {
     referencedDeclaredValues: Set<AbstractValue>,
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects> | void,
     additionalFunctionValueInfos: Map<FunctionValue, AdditionalFunctionInfo>,
+    reactBytecodeFunctionValuesAndEffects: Map<FunctionValue, ReactBytecodeEffects>,
     declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>,
     statistics: SerializerStatistics,
     react: ReactSerializerState
@@ -86,6 +88,7 @@ export class LazyObjectsSerializer extends ResidualHeapSerializer {
       referencedDeclaredValues,
       additionalFunctionValuesAndEffects,
       additionalFunctionValueInfos,
+      reactBytecodeFunctionValuesAndEffects,
       declarativeEnvironmentRecordsBindings,
       statistics,
       react

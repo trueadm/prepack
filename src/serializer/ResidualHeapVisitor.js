@@ -42,6 +42,7 @@ import type {
   FunctionInstance,
   ClassMethodInstance,
   AdditionalFunctionEffects,
+  ReactBytecodeEffects,
 } from "./types.js";
 import { ClosureRefVisitor } from "./visitors.js";
 import { Logger } from "./logger.js";
@@ -73,7 +74,8 @@ export class ResidualHeapVisitor {
     realm: Realm,
     logger: Logger,
     modules: Modules,
-    additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects>
+    additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects>,
+    reactBytecodeFunctionValuesAndEffects: Map<FunctionValue, ReactBytecodeEffects>
   ) {
     invariant(realm.useAbstractInterpretation);
     this.realm = realm;

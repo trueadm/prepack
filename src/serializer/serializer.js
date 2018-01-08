@@ -123,13 +123,15 @@ export class Serializer {
     }
 
     let additionalFunctionValuesAndEffects = this.functions.getAdditionalFunctionValuesToEffects();
+    let reactBytecodeFunctionValuesAndEffects = this.functions.getReactBytecodeEffects();
     //Deep traversal of the heap to identify the necessary scope of residual functions
     if (timingStats !== undefined) timingStats.deepTraversalTime = Date.now();
     let residualHeapVisitor = new ResidualHeapVisitor(
       this.realm,
       this.logger,
       this.modules,
-      additionalFunctionValuesAndEffects
+      additionalFunctionValuesAndEffects,
+      reactBytecodeFunctionValuesAndEffects
     );
     residualHeapVisitor.visitRoots();
     if (this.logger.hasErrors()) return undefined;
@@ -148,7 +150,8 @@ export class Serializer {
         this.realm,
         this.logger,
         this.modules,
-        additionalFunctionValuesAndEffects
+        additionalFunctionValuesAndEffects,
+        reactBytecodeFunctionValuesAndEffects
       );
       heapRefCounter.visitRoots();
 
@@ -157,6 +160,7 @@ export class Serializer {
         this.logger,
         this.modules,
         additionalFunctionValuesAndEffects,
+        reactBytecodeFunctionValuesAndEffects,
         residualHeapValueIdentifiers,
         heapRefCounter.getResult()
       );
@@ -185,6 +189,7 @@ export class Serializer {
         residualHeapVisitor.referencedDeclaredValues,
         additionalFunctionValuesAndEffects,
         residualHeapVisitor.additionalFunctionValueInfos,
+        reactBytecodeFunctionValuesAndEffects,
         residualHeapVisitor.declarativeEnvironmentRecordsBindings,
         this.statistics,
         this.react
@@ -211,6 +216,7 @@ export class Serializer {
       residualHeapVisitor.referencedDeclaredValues,
       additionalFunctionValuesAndEffects,
       residualHeapVisitor.additionalFunctionValueInfos,
+      reactBytecodeFunctionValuesAndEffects,
       residualHeapVisitor.declarativeEnvironmentRecordsBindings,
       this.statistics,
       this.react

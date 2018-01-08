@@ -10,7 +10,7 @@
 /* @flow */
 
 import { DeclarativeEnvironmentRecord, type Binding } from "../environment.js";
-import { ConcreteValue, Value, ObjectValue } from "../values/index.js";
+import { ConcreteValue, Value, ObjectValue, ArrayValue } from "../values/index.js";
 import type { ECMAScriptSourceFunctionValue, FunctionValue } from "../values/index.js";
 import type { BabelNodeExpression, BabelNodeStatement } from "babel-types";
 import { SameValue } from "../methods/abstract.js";
@@ -36,6 +36,11 @@ export type SerializedBody = {
 export type AdditionalFunctionEffects = {
   effects: Effects,
   transforms: Array<Function>,
+};
+
+export type ReactBytecodeEffects = {
+  mountInstructions: ArrayValue,
+  funcs: Array<ECMAScriptSourceFunctionValue>,
 };
 
 export type AdditionalFunctionInfo = {

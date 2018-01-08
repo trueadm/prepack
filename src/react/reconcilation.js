@@ -24,7 +24,7 @@ import {
   ObjectValue,
   AbstractObjectValue,
 } from "../values/index.js";
-import { ReactStatistics, type ReactSerializerState } from "../serializer/types.js";
+import { ReactStatistics, type ReactSerializerState, type ReactBytecodeEffects } from "../serializer/types.js";
 import { isReactElement, valueIsClassComponent, mapOverArrayValue, valueIsLegacyCreateClassComponent } from "./utils";
 import { Get } from "../methods/index.js";
 import invariant from "../invariant.js";
@@ -32,6 +32,7 @@ import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { BranchState, type BranchStatusEnum } from "./branching.js";
 import { getInitialProps, getInitialContext, createClassInstance, createSimpleClassInstance } from "./components.js";
 import { ExpectedBailOut, SimpleClassBailOut } from "./errors.js";
+import { createMountInstructions } from "./bytecode.js";
 
 export class Reconciler {
   constructor(
@@ -54,8 +55,8 @@ export class Reconciler {
   reactSerializerState: ReactSerializerState;
   simpleClassComponents: Set<Value>;
 
-  render(componentType: ECMAScriptSourceFunctionValue): Effects {
-    return this.realm.wrapInGlobalEnv(() =>
+  render(componentType: ECMAScriptSourceFunctionValue, bytecodeOutput: boolean): Effects | ReactBytecodeEffects {
+    const renderResult = this.realm.wrapInGlobalEnv(() =>
       // TODO: (sebmarkbage): You could use the return value of this to detect if there are any mutations on objects other
       // than newly created ones. Then log those to the error logger. That'll help us track violations in
       // components. :)
@@ -93,6 +94,17 @@ export class Reconciler {
         `react component: ${componentType.getName()}`
       )
     );
+    if (bytecodeOutput) {
+      let returnValue = renderResult[0];
+      invariant(returnValue instanceof Value);
+      let mountInstructions = createMountInstructions(returnValue, this.realm);
+
+      return {
+        mountInstructions,
+        funcs: [],
+      };
+    }
+    return renderResult;
   }
 
   _renderComplexClassComponent(

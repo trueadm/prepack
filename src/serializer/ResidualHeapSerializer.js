@@ -52,6 +52,7 @@ import type {
   SerializedBody,
   ClassMethodInstance,
   AdditionalFunctionEffects,
+  ReactBytecodeEffects,
 } from "./types.js";
 import type { SerializerOptions } from "../options.js";
 import { TimingStatistics, SerializerStatistics, BodyReference } from "./types.js";
@@ -99,6 +100,7 @@ export class ResidualHeapSerializer {
     referencedDeclaredValues: Set<AbstractValue>,
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects> | void,
     additionalFunctionValueInfos: Map<FunctionValue, AdditionalFunctionInfo>,
+    reactBytecodeFunctionValuesAndEffects: Map<FunctionValue, ReactBytecodeEffects>,
     declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>,
     statistics: SerializerStatistics,
     react: ReactSerializerState
