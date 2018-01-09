@@ -743,7 +743,8 @@ export class ResidualHeapVisitor {
   }
 
   _visitReactBytecodeNode(reactBytecodeNode: ReactBytecodeNode) {
-    let { effects, mountInstructions } = reactBytecodeNode;
+    let { effects, instructions } = reactBytecodeNode;
+    invariant(effects);
     let [
       result,
       ,
@@ -752,11 +753,11 @@ export class ResidualHeapVisitor {
       createdObjects,
     ] = effects;
     this.realm.applyEffects([result, new Generator(this.realm), modifiedBindings, modifiedProperties, createdObjects]);
-    this.visitValue(mountInstructions);
+    this.visitValue(instructions);
     this.realm.restoreBindings(modifiedBindings);
     this.realm.restoreProperties(modifiedProperties);
-    this.reactBytecodeNodes.set(mountInstructions, reactBytecodeNode);
-    return mountInstructions;
+    this.reactBytecodeNodes.set(instructions, reactBytecodeNode);
+    return instructions;
   }
 
   _visitAdditionalFunction(

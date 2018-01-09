@@ -1650,7 +1650,8 @@ export class ResidualHeapSerializer {
   }
 
   _serializeReactBytecodeNode(reactBytecodeNode: ReactBytecodeNode): BabelNodeExpression {
-    let { effects, mountInstructions } = reactBytecodeNode;
+    let { effects, instructions, values } = reactBytecodeNode;
+    invariant(effects);
     let [
       result,
       ,
@@ -1659,7 +1660,25 @@ export class ResidualHeapSerializer {
       createdObjects,
     ] = effects;
     this.realm.applyEffects([result, new Generator(this.realm), modifiedBindings, modifiedProperties, createdObjects]);
-    let arrayNode = this._serializeValueArray(mountInstructions);
+
+    for (let [value, bytecodeValueNode] of values) {
+      console.log(value);
+      let { func, generator, slotIndex } = bytecodeValueNode;
+      let statements = this._withGeneratorScope(generator, newBody => {
+        let oldCurBody = this.currentFunctionBody;
+        this.currentFunctionBody = newBody;
+        debugger;
+        let context = this._getContext();
+        generator.serialize(context);
+        let node = this.serializeValue(value);
+        this.emitter.emit(node);
+        this.currentFunctionBody = oldCurBody;
+      });
+
+      debugger;
+    }
+
+    let arrayNode = this._serializeValueArray(instructions);
     this.realm.restoreBindings(modifiedBindings);
     this.realm.restoreProperties(modifiedProperties);
     return arrayNode;

@@ -18,12 +18,16 @@ import {
   NumberValue,
   StringValue,
   ReactOpcodeValue,
+  ECMAScriptSourceFunctionValue,
 } from "../values/index.js";
-import type { ReactBytecodeNode } from "../serializer/types.js";
+import type { ReactBytecodeNode, ReactBytecodeValueNode } from "../serializer/types.js";
 import { Properties, Create } from "../singletons.js";
 import { Get } from "../methods/index.js";
 import { isReactElement } from "./utils.js";
 import invariant from "../invariant.js";
+import { Generator } from "../utils/generator";
+import type { FunctionBodyAstNode } from "../types.js";
+import * as t from "babel-types";
 
 const ELEMENT_OPEN = { value: 1, hint: "ELEMENT_OPEN" };
 const ELEMENT_OPEN_DIV = { value: 2, hint: "ELEMENT_OPEN_DIV" };
@@ -76,6 +80,13 @@ const UNKNOWN_CHILDREN = { value: 36, hint: "UNKNOWN_CHILDREN" };
 // const EVENT_DYNAMIC_BOUND = 41;
 // const EVENT_DYNAMIC_BOUND_FROM_SLOT = 42;
 
+type BytecodeNodeState = {
+  instructions: Array<Value>,
+  values: Map<Value, ReactBytecodeValueNode>,
+  funcs: Set<ECMAScriptSourceFunctionValue>,
+  slotIndex: number,
+};
+
 function convertJSArrayToArrayValue(jsArray, realm): ArrayValue {
   const arrayValue = Create.ArrayCreate(realm, 0, realm.intrinsics.ArrayPrototype);
 
@@ -90,10 +101,39 @@ function createOpcode(realm: Realm, code) {
   return new ReactOpcodeValue(realm, code.value, code.hint);
 }
 
+function getBytecodeValueNode(
+  realm: Realm,
+  propValue: Value,
+  bytecodeNodeState: BytecodeNodeState
+): ReactBytecodeValueNode {
+  if (bytecodeNodeState.values.has(propValue)) {
+    let bytecodeNodeValueNode = bytecodeNodeState.values.get(propValue);
+    invariant(bytecodeNodeValueNode);
+    return bytecodeNodeValueNode;
+  }
+  let generator = realm.generator;
+  invariant(generator instanceof Generator);
+
+  let func = new ECMAScriptSourceFunctionValue(realm);
+  let body = t.blockStatement([]);
+  func.$FormalParameters = [];
+  func.$ECMAScriptCode = body;
+  ((body: any): FunctionBodyAstNode).uniqueOrderedTag = realm.functionBodyUniqueTagSeed++;
+
+  let bytecodeValueNode = {
+    func,
+    generator,
+    slotIndex: new NumberValue(realm, bytecodeNodeState.slotIndex++),
+  };
+  bytecodeNodeState.values.set(propValue, bytecodeValueNode);
+  bytecodeNodeState.funcs.add(func);
+  return bytecodeValueNode;
+}
+
 function createInstructionsFromReactElementValue(
   realm: Realm,
   reactElement: ObjectValue,
-  instructions: Array<Value>
+  bytecodeNodeState: BytecodeNodeState
 ): void {
   let typeValue = Get(realm, reactElement, "type");
   let propsValue = Get(realm, reactElement, "props");
@@ -102,57 +142,61 @@ function createInstructionsFromReactElementValue(
   if (typeValue instanceof StringValue) {
     let stringValue = typeValue.value;
     if (stringValue === "div") {
-      instructions.push(createOpcode(realm, ELEMENT_OPEN_DIV));
+      bytecodeNodeState.instructions.push(createOpcode(realm, ELEMENT_OPEN_DIV));
     } else if (stringValue === "span") {
-      instructions.push(createOpcode(realm, ELEMENT_OPEN_SPAN));
+      bytecodeNodeState.instructions.push(createOpcode(realm, ELEMENT_OPEN_SPAN));
     } else {
-      instructions.push(createOpcode(realm, ELEMENT_OPEN), typeValue);
+      bytecodeNodeState.instructions.push(createOpcode(realm, ELEMENT_OPEN), typeValue);
     }
 
     for (let [propName] of propsValue.properties) {
-      const propValue = Get(realm, propsValue, propName);
+      let propValue = Get(realm, propsValue, propName);
 
       if (propName === "children") {
         if (propValue instanceof StringValue) {
-          instructions.push(createOpcode(realm, TEXT_STATIC_CONTENT), propValue);
+          bytecodeNodeState.instructions.push(createOpcode(realm, TEXT_STATIC_CONTENT), propValue);
         } else if (propValue instanceof AbstractValue) {
-          instructions.push(createOpcode(realm, UNKNOWN_CHILDREN), propValue);
-          debugger;
+          let { func, slotIndex } = getBytecodeValueNode(realm, propValue, bytecodeNodeState);
+          bytecodeNodeState.instructions.push(createOpcode(realm, UNKNOWN_CHILDREN), func, slotIndex);
         } else if (isReactElement(propValue)) {
           invariant(propValue instanceof ObjectValue);
-          createInstructionsFromReactElementValue(realm, propValue, instructions);
+          createInstructionsFromReactElementValue(realm, propValue, bytecodeNodeState);
         }
       } else if (propName === "className") {
         if (propValue instanceof StringValue) {
-          instructions.push(createOpcode(realm, PROPERTY_STATIC_CLASS_NAME), propValue);
+          bytecodeNodeState.instructions.push(createOpcode(realm, PROPERTY_STATIC_CLASS_NAME), propValue);
         }
       }
     }
-    instructions.push(createOpcode(realm, ELEMENT_CLOSE));
+    bytecodeNodeState.instructions.push(createOpcode(realm, ELEMENT_CLOSE));
   }
 }
 
-function createInstructionsFromValue(realm: Realm, value: Value, instructions: Array<Value>): void {
+function createInstructionsFromValue(realm: Realm, value: Value, bytecodeNodeState: BytecodeNodeState): void {
   if (isReactElement(value)) {
     invariant(value instanceof ObjectValue);
-    createInstructionsFromReactElementValue(realm, value, instructions);
+    createInstructionsFromReactElementValue(realm, value, bytecodeNodeState);
   } else if (value instanceof StringValue || value instanceof NumberValue) {
-    instructions.push(createOpcode(realm, TEXT_STATIC_NODE), value);
+    bytecodeNodeState.instructions.push(createOpcode(realm, TEXT_STATIC_NODE), value);
   } else {
     // TODO
   }
 }
 
 export function createReactBytecodeNode(realm: Realm, value: Value): ReactBytecodeNode {
-  const mountInstructions = [];
-  const values = new Map();
+  let bytecodeNodeState = {
+    funcs: new Set(),
+    instructions: [],
+    slotIndex: 0,
+    values: new Map(),
+  };
 
-  createInstructionsFromValue(realm, value, mountInstructions);
+  createInstructionsFromValue(realm, value, bytecodeNodeState);
 
   return {
     effects: null,
-    funcs: [],
-    mountInstructions: convertJSArrayToArrayValue(mountInstructions, realm),
-    values,
+    funcs: bytecodeNodeState.funcs,
+    instructions: convertJSArrayToArrayValue(bytecodeNodeState.instructions, realm),
+    values: bytecodeNodeState.values,
   };
 }

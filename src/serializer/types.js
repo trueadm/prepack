@@ -10,9 +10,10 @@
 /* @flow */
 
 import { DeclarativeEnvironmentRecord, type Binding } from "../environment.js";
-import { ConcreteValue, Value, ObjectValue, ArrayValue } from "../values/index.js";
+import { ConcreteValue, Value, ObjectValue, ArrayValue, NumberValue } from "../values/index.js";
 import type { ECMAScriptSourceFunctionValue, FunctionValue } from "../values/index.js";
 import type { BabelNodeExpression, BabelNodeStatement } from "babel-types";
+import { Generator } from "../utils/generator.js";
 import { SameValue } from "../methods/abstract.js";
 import { Realm, type Effects } from "../realm.js";
 import invariant from "../invariant.js";
@@ -40,9 +41,15 @@ export type AdditionalFunctionEffects = {
 
 export type ReactBytecodeNode = {
   effects: Effects | null,
-  funcs: Array<ECMAScriptSourceFunctionValue>,
-  mountInstructions: ArrayValue,
-  values: Map<Value, any>,
+  funcs: Set<ECMAScriptSourceFunctionValue>,
+  instructions: ArrayValue,
+  values: Map<Value, ReactBytecodeValueNode>,
+};
+
+export type ReactBytecodeValueNode = {
+  func: ECMAScriptSourceFunctionValue,
+  generator: Generator,
+  slotIndex: NumberValue,
 };
 
 export type AdditionalFunctionInfo = {
