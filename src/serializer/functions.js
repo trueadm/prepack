@@ -14,7 +14,7 @@ import { Completion, ThrowCompletion } from "../completions.js";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
 import invariant from "../invariant.js";
 import { type Effects, type PropertyBindings, Realm } from "../realm.js";
-import type { AdditionalFunctionEffects, ReactBytecodeEffects } from "./types.js";
+import type { AdditionalFunctionEffects, ReactBytecodeNode } from "./types.js";
 import type { PropertyBinding } from "../types.js";
 import { ignoreErrorsIn } from "../utils/errors.js";
 import {
@@ -39,7 +39,7 @@ export class Functions {
     this.functions = functions;
     this.moduleTracer = moduleTracer;
     this.writeEffects = new Map();
-    this.reactBytecodeEffects = new Map();
+    this.reactBytecodeNodes = new Map();
     this.functionExpressions = new Map();
   }
 
@@ -49,7 +49,7 @@ export class Functions {
   functionExpressions: Map<FunctionValue, string>;
   moduleTracer: ModuleTracer;
   writeEffects: Map<FunctionValue, AdditionalFunctionEffects>;
-  reactBytecodeEffects: Map<FunctionValue, ReactBytecodeEffects>;
+  reactBytecodeNodes: Map<FunctionValue, ReactBytecodeNode>;
 
   _generateAdditionalFunctionCallsFromInput(): Array<[FunctionValue, BabelNodeCallExpression]> {
     // lookup functions
@@ -139,7 +139,7 @@ export class Functions {
       // out many functions and an array with all the bytecodes/references/strings in
       if (this.realm.react.output === "bytecode") {
         let reactBytecodeEffects = reconciler.render(componentType, true);
-        this.reactBytecodeEffects.set(componentType, ((reactBytecodeEffects: any): ReactBytecodeEffects));
+        this.reactBytecodeNodes.set(componentType, ((reactBytecodeEffects: any): ReactBytecodeNode));
       } else {
         let effects = reconciler.render(componentType, false);
         let additionalFunctionEffects = this._createAdditionalEffects(((effects: any): Effects));
@@ -245,8 +245,8 @@ export class Functions {
     return this.writeEffects;
   }
 
-  getReactBytecodeEffects(): Map<FunctionValue, ReactBytecodeEffects> {
-    return this.reactBytecodeEffects;
+  getReactBytecodeNodes(): Map<FunctionValue, ReactBytecodeNode> {
+    return this.reactBytecodeNodes;
   }
 
   reportWriteConflicts(

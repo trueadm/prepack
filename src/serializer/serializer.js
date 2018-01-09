@@ -123,7 +123,7 @@ export class Serializer {
     }
 
     let additionalFunctionValuesAndEffects = this.functions.getAdditionalFunctionValuesToEffects();
-    let reactBytecodeFunctionValuesAndEffects = this.functions.getReactBytecodeEffects();
+    let reactFunctionToBytecodeNodes = this.functions.getReactBytecodeNodes();
     //Deep traversal of the heap to identify the necessary scope of residual functions
     if (timingStats !== undefined) timingStats.deepTraversalTime = Date.now();
     let residualHeapVisitor = new ResidualHeapVisitor(
@@ -131,7 +131,7 @@ export class Serializer {
       this.logger,
       this.modules,
       additionalFunctionValuesAndEffects,
-      reactBytecodeFunctionValuesAndEffects
+      reactFunctionToBytecodeNodes
     );
     residualHeapVisitor.visitRoots();
     if (this.logger.hasErrors()) return undefined;
@@ -151,7 +151,7 @@ export class Serializer {
         this.logger,
         this.modules,
         additionalFunctionValuesAndEffects,
-        reactBytecodeFunctionValuesAndEffects
+        reactFunctionToBytecodeNodes
       );
       heapRefCounter.visitRoots();
 
@@ -160,7 +160,7 @@ export class Serializer {
         this.logger,
         this.modules,
         additionalFunctionValuesAndEffects,
-        reactBytecodeFunctionValuesAndEffects,
+        reactFunctionToBytecodeNodes,
         residualHeapValueIdentifiers,
         heapRefCounter.getResult()
       );
@@ -189,8 +189,8 @@ export class Serializer {
         residualHeapVisitor.referencedDeclaredValues,
         additionalFunctionValuesAndEffects,
         residualHeapVisitor.additionalFunctionValueInfos,
-        reactBytecodeFunctionValuesAndEffects,
         residualHeapVisitor.declarativeEnvironmentRecordsBindings,
+        residualHeapVisitor.reactBytecodeNodes,
         this.statistics,
         this.react
       ).serialize();
@@ -216,8 +216,8 @@ export class Serializer {
       residualHeapVisitor.referencedDeclaredValues,
       additionalFunctionValuesAndEffects,
       residualHeapVisitor.additionalFunctionValueInfos,
-      reactBytecodeFunctionValuesAndEffects,
       residualHeapVisitor.declarativeEnvironmentRecordsBindings,
+      residualHeapVisitor.reactBytecodeNodes,
       this.statistics,
       this.react
     );

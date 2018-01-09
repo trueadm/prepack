@@ -24,7 +24,7 @@ import {
   ObjectValue,
   AbstractObjectValue,
 } from "../values/index.js";
-import { ReactStatistics, type ReactSerializerState, type ReactBytecodeEffects } from "../serializer/types.js";
+import { ReactStatistics, type ReactSerializerState, type ReactBytecodeNode } from "../serializer/types.js";
 import { isReactElement, valueIsClassComponent, mapOverArrayValue, valueIsLegacyCreateClassComponent } from "./utils";
 import { Get } from "../methods/index.js";
 import invariant from "../invariant.js";
@@ -55,8 +55,9 @@ export class Reconciler {
   reactSerializerState: ReactSerializerState;
   simpleClassComponents: Set<Value>;
 
-  render(componentType: ECMAScriptSourceFunctionValue, bytecodeOutput: boolean): Effects | ReactBytecodeEffects {
-    const renderResult = this.realm.wrapInGlobalEnv(() =>
+  render(componentType: ECMAScriptSourceFunctionValue, bytecodeOutput: boolean): Effects | ReactBytecodeNode {
+    let mountInstructions;
+    let effects = this.realm.wrapInGlobalEnv(() =>
       // TODO: (sebmarkbage): You could use the return value of this to detect if there are any mutations on objects other
       // than newly created ones. Then log those to the error logger. That'll help us track violations in
       // components. :)
@@ -73,6 +74,10 @@ export class Reconciler {
             let initialContext = getInitialContext(this.realm, componentType);
             let { result } = this._renderComponent(componentType, initialProps, initialContext, "ROOT", null);
             this.statistics.optimizedTrees++;
+
+            if (bytecodeOutput) {
+              mountInstructions = createMountInstructions(this.realm, result);
+            }
             return result;
           } catch (error) {
             // if there was a bail-out on the root component in this reconcilation process, then this
@@ -95,16 +100,14 @@ export class Reconciler {
       )
     );
     if (bytecodeOutput) {
-      let returnValue = renderResult[0];
-      invariant(returnValue instanceof Value);
-      let mountInstructions = createMountInstructions(returnValue, this.realm);
-
+      invariant(mountInstructions);
       return {
+        effects,
         mountInstructions,
         funcs: [],
       };
     }
-    return renderResult;
+    return effects;
   }
 
   _renderComplexClassComponent(

@@ -28,6 +28,8 @@ export { default as NullValue } from "./NullValue.js";
 
 export { default as NumberValue } from "./NumberValue.js";
 
+export { default as ReactOpcodeValue } from "./ReactOpcodeValue.js";
+
 export { default as ProxyValue } from "./ProxyValue.js";
 export { default as StringExotic } from "./StringExotic.js";
 export { default as ArgumentsExotic } from "./ArgumentsExotic.js";

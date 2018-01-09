@@ -10,7 +10,7 @@
 /* @flow */
 
 import { Realm } from "../realm.js";
-import { AbstractValue, FunctionValue, Value, ObjectValue } from "../values/index.js";
+import { AbstractValue, FunctionValue, Value, ObjectValue, ArrayValue } from "../values/index.js";
 import * as t from "babel-types";
 import type {
   BabelNodeExpression,
@@ -28,7 +28,7 @@ import type {
   ClassMethodInstance,
   AdditionalFunctionEffects,
   ResidualFunctionBinding,
-  ReactBytecodeEffects,
+  ReactBytecodeNode,
 } from "./types.js";
 import type { SerializerOptions } from "../options.js";
 import invariant from "../invariant.js";
@@ -69,8 +69,8 @@ export class LazyObjectsSerializer extends ResidualHeapSerializer {
     referencedDeclaredValues: Set<AbstractValue>,
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects> | void,
     additionalFunctionValueInfos: Map<FunctionValue, AdditionalFunctionInfo>,
-    reactBytecodeFunctionValuesAndEffects: Map<FunctionValue, ReactBytecodeEffects>,
     declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>,
+    reactBytecodeNodes: Map<ArrayValue, ReactBytecodeNode>,
     statistics: SerializerStatistics,
     react: ReactSerializerState
   ) {
@@ -88,8 +88,8 @@ export class LazyObjectsSerializer extends ResidualHeapSerializer {
       referencedDeclaredValues,
       additionalFunctionValuesAndEffects,
       additionalFunctionValueInfos,
-      reactBytecodeFunctionValuesAndEffects,
       declarativeEnvironmentRecordsBindings,
+      reactBytecodeNodes,
       statistics,
       react
     );

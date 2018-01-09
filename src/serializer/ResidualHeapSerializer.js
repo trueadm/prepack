@@ -13,6 +13,7 @@ import { Realm } from "../realm.js";
 import type { Descriptor, PropertyBinding } from "../types.js";
 import { IsArray, Get } from "../methods/index.js";
 import {
+  ArrayValue,
   BoundFunctionValue,
   ProxyValue,
   SymbolValue,
@@ -27,6 +28,7 @@ import {
   ObjectValue,
   NativeFunctionValue,
   UndefinedValue,
+  ReactOpcodeValue,
 } from "../values/index.js";
 import * as t from "babel-types";
 import type {
@@ -52,7 +54,7 @@ import type {
   SerializedBody,
   ClassMethodInstance,
   AdditionalFunctionEffects,
-  ReactBytecodeEffects,
+  ReactBytecodeNode,
 } from "./types.js";
 import type { SerializerOptions } from "../options.js";
 import { TimingStatistics, SerializerStatistics, BodyReference } from "./types.js";
@@ -100,8 +102,8 @@ export class ResidualHeapSerializer {
     referencedDeclaredValues: Set<AbstractValue>,
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects> | void,
     additionalFunctionValueInfos: Map<FunctionValue, AdditionalFunctionInfo>,
-    reactBytecodeFunctionValuesAndEffects: Map<FunctionValue, ReactBytecodeEffects>,
     declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>,
+    reactBytecodeNodes: Map<ArrayValue, ReactBytecodeNode>,
     statistics: SerializerStatistics,
     react: ReactSerializerState
   ) {
@@ -172,6 +174,7 @@ export class ResidualHeapSerializer {
     this.additionalFunctionValuesAndEffects = additionalFunctionValuesAndEffects;
     this.additionalFunctionValueInfos = additionalFunctionValueInfos;
     this.declarativeEnvironmentRecordsBindings = declarativeEnvironmentRecordsBindings;
+    this.reactBytecodeNodes = reactBytecodeNodes;
   }
 
   emitter: Emitter;
@@ -215,6 +218,7 @@ export class ResidualHeapSerializer {
   declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>;
   react: ReactSerializerState;
   residualReactElements: ResidualReactElements;
+  reactBytecodeNodes: Map<ArrayValue, ReactBytecodeNode>;
 
   // function values nested in additional functions can't delay initializations
   // TODO: revisit this and fix additional functions to be capable of delaying initializations
@@ -1516,10 +1520,20 @@ export class ResidualHeapSerializer {
     } else if (val instanceof UndefinedValue) {
       return voidExpression;
     } else if (ResidualHeapInspector.isLeaf(val)) {
-      return t.valueToNode(val.serialize());
+      const node = t.valueToNode(val.serialize());
+      if (val instanceof ReactOpcodeValue) {
+        node.leadingComments = [({ type: "BlockComment", value: val.hint }: any)];
+      }
+      return node;
     } else if (IsArray(this.realm, val)) {
-      invariant(val instanceof ObjectValue);
-      return this._serializeValueArray(val);
+      invariant(val instanceof ArrayValue);
+      if (this.reactBytecodeNodes.has(val)) {
+        let bytecodeNode = this.reactBytecodeNodes.get(val);
+        invariant(bytecodeNode);
+        return this._serializeReactBytecodeNode(bytecodeNode);
+      } else {
+        return this._serializeValueArray(val);
+      }
     } else if (val instanceof ProxyValue) {
       return this._serializeValueProxy(val);
     } else if (val instanceof FunctionValue) {
@@ -1633,6 +1647,22 @@ export class ResidualHeapSerializer {
       }
     }
     return false;
+  }
+
+  _serializeReactBytecodeNode(reactBytecodeNode: ReactBytecodeNode): BabelNodeExpression {
+    let { effects, mountInstructions } = reactBytecodeNode;
+    let [
+      result,
+      ,
+      modifiedBindings,
+      modifiedProperties: Map<PropertyBinding, void | Descriptor>,
+      createdObjects,
+    ] = effects;
+    this.realm.applyEffects([result, new Generator(this.realm), modifiedBindings, modifiedProperties, createdObjects]);
+    let arrayNode = this._serializeValueArray(mountInstructions);
+    this.realm.restoreBindings(modifiedBindings);
+    this.realm.restoreProperties(modifiedProperties);
+    return arrayNode;
   }
 
   processAdditionalFunctionValues(): Map<FunctionValue, Array<BabelNodeStatement>> {

@@ -38,7 +38,8 @@ export type AdditionalFunctionEffects = {
   transforms: Array<Function>,
 };
 
-export type ReactBytecodeEffects = {
+export type ReactBytecodeNode = {
+  effects: Effects,
   mountInstructions: ArrayValue,
   funcs: Array<ECMAScriptSourceFunctionValue>,
 };
