@@ -53,7 +53,7 @@ const PROPERTY_STATIC_CLASS_NAME = { value: 22, hint: "PROPERTY_STATIC_CLASS_NAM
 
 const TEXT_STATIC_CONTENT = { value: 31, hint: "TEXT_STATIC_CONTENT" };
 // const TEXT_DYNAMIC_CONTENT = { value: 32, hint: "TEXT_DYNAMIC_CONTENT" };
-// const TEXT_STATIC_NODE = { value: 33, hint: "TEXT_STATIC_NODE" };
+const TEXT_STATIC_NODE = { value: 33, hint: "TEXT_STATIC_NODE" };
 // const TEXT_DYNAMIC_NODE = { value: 34, hint: "TEXT_DYNAMIC_NODE" };
 // const TEXT_DYNAMIC_NODE_FROM_SLOT = { value: 35, hint: "TEXT_DYNAMIC_NODE_FROM_SLOT" };
 
@@ -106,7 +106,6 @@ function createInstructionsFromReactElementValue(
           instructions.push(createOpcode(realm, TEXT_STATIC_CONTENT), propValue);
         } else if (propValue instanceof AbstractValue) {
           debugger;
-          realm.generator._entries[0].buildNode(realm.generator._entries[0].args)
         } else if (isReactElement(propValue)) {
           invariant(propValue instanceof ObjectValue);
           createInstructionsFromReactElementValue(realm, propValue, instructions);
@@ -125,6 +124,8 @@ function createInstructionsFromValue(realm: Realm, value: Value, instructions: A
   if (isReactElement(value)) {
     invariant(value instanceof ObjectValue);
     createInstructionsFromReactElementValue(realm, value, instructions);
+  } else if (value instanceof StringValue || value instanceof NumberValue) {
+    instructions.push(createOpcode(realm, TEXT_STATIC_NODE), value);
   } else {
     // TODO
   }
