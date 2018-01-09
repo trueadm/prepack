@@ -32,7 +32,7 @@ import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { BranchState, type BranchStatusEnum } from "./branching.js";
 import { getInitialProps, getInitialContext, createClassInstance, createSimpleClassInstance } from "./components.js";
 import { ExpectedBailOut, SimpleClassBailOut } from "./errors.js";
-import { createMountInstructions } from "./bytecode.js";
+import { createReactBytecodeNode } from "./bytecode.js";
 
 export class Reconciler {
   constructor(
@@ -56,7 +56,7 @@ export class Reconciler {
   simpleClassComponents: Set<Value>;
 
   render(componentType: ECMAScriptSourceFunctionValue, bytecodeOutput: boolean): Effects | ReactBytecodeNode {
-    let mountInstructions;
+    let bytecodeNode;
     let effects = this.realm.wrapInGlobalEnv(() =>
       // TODO: (sebmarkbage): You could use the return value of this to detect if there are any mutations on objects other
       // than newly created ones. Then log those to the error logger. That'll help us track violations in
@@ -76,7 +76,7 @@ export class Reconciler {
             this.statistics.optimizedTrees++;
 
             if (bytecodeOutput) {
-              mountInstructions = createMountInstructions(this.realm, result);
+              bytecodeNode = createReactBytecodeNode(this.realm, result);
             }
             return result;
           } catch (error) {
@@ -100,12 +100,9 @@ export class Reconciler {
       )
     );
     if (bytecodeOutput) {
-      invariant(mountInstructions);
-      return {
-        effects,
-        mountInstructions,
-        funcs: [],
-      };
+      invariant(bytecodeNode);
+      bytecodeNode.effects = effects;
+      return bytecodeNode;
     }
     return effects;
   }

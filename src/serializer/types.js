@@ -39,9 +39,10 @@ export type AdditionalFunctionEffects = {
 };
 
 export type ReactBytecodeNode = {
-  effects: Effects,
-  mountInstructions: ArrayValue,
+  effects: Effects | null,
   funcs: Array<ECMAScriptSourceFunctionValue>,
+  mountInstructions: ArrayValue,
+  values: Map<Value, any>,
 };
 
 export type AdditionalFunctionInfo = {

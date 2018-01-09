@@ -10,7 +10,16 @@
 /* @flow */
 
 import { Realm } from "../realm.js";
-import { Value, AbstractValue, ArrayValue, ObjectValue, NumberValue, StringValue, ReactOpcodeValue } from "../values/index.js";
+import {
+  Value,
+  AbstractValue,
+  ArrayValue,
+  ObjectValue,
+  NumberValue,
+  StringValue,
+  ReactOpcodeValue,
+} from "../values/index.js";
+import type { ReactBytecodeNode } from "../serializer/types.js";
 import { Properties, Create } from "../singletons.js";
 import { Get } from "../methods/index.js";
 import { isReactElement } from "./utils.js";
@@ -57,13 +66,15 @@ const TEXT_STATIC_NODE = { value: 33, hint: "TEXT_STATIC_NODE" };
 // const TEXT_DYNAMIC_NODE = { value: 34, hint: "TEXT_DYNAMIC_NODE" };
 // const TEXT_DYNAMIC_NODE_FROM_SLOT = { value: 35, hint: "TEXT_DYNAMIC_NODE_FROM_SLOT" };
 
-// const ATTRIBUTE_STATIC = 36;
-// const ATTRIBUTE_DYNAMIC = 37;
-// const ATTRIBUTE_DYNAMIC_FROM_SLOT = 38;
+const UNKNOWN_CHILDREN = { value: 36, hint: "UNKNOWN_CHILDREN" };
 
-// const EVENT_STATIC_BOUND = 39;
-// const EVENT_DYNAMIC_BOUND = 40;
-// const EVENT_DYNAMIC_BOUND_FROM_SLOT = 41;
+// const ATTRIBUTE_STATIC = 37;
+// const ATTRIBUTE_DYNAMIC = 38;
+// const ATTRIBUTE_DYNAMIC_FROM_SLOT = 39;
+
+// const EVENT_STATIC_BOUND = 40;
+// const EVENT_DYNAMIC_BOUND = 41;
+// const EVENT_DYNAMIC_BOUND_FROM_SLOT = 42;
 
 function convertJSArrayToArrayValue(jsArray, realm): ArrayValue {
   const arrayValue = Create.ArrayCreate(realm, 0, realm.intrinsics.ArrayPrototype);
@@ -105,6 +116,7 @@ function createInstructionsFromReactElementValue(
         if (propValue instanceof StringValue) {
           instructions.push(createOpcode(realm, TEXT_STATIC_CONTENT), propValue);
         } else if (propValue instanceof AbstractValue) {
+          instructions.push(createOpcode(realm, UNKNOWN_CHILDREN), propValue);
           debugger;
         } else if (isReactElement(propValue)) {
           invariant(propValue instanceof ObjectValue);
@@ -131,10 +143,16 @@ function createInstructionsFromValue(realm: Realm, value: Value, instructions: A
   }
 }
 
-export function createMountInstructions(realm: Realm, value: Value): ArrayValue {
+export function createReactBytecodeNode(realm: Realm, value: Value): ReactBytecodeNode {
   const mountInstructions = [];
+  const values = new Map();
 
   createInstructionsFromValue(realm, value, mountInstructions);
 
-  return convertJSArrayToArrayValue(mountInstructions, realm);
+  return {
+    effects: null,
+    funcs: [],
+    mountInstructions: convertJSArrayToArrayValue(mountInstructions, realm),
+    values,
+  };
 }
