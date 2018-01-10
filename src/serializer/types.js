@@ -42,14 +42,17 @@ export type AdditionalFunctionEffects = {
 export type ReactBytecodeNode = {
   effects: Effects | null,
   funcs: Set<ECMAScriptSourceFunctionValue>,
+  generator: Generator,
+  instructionsFunc: ECMAScriptSourceFunctionValue,
   instructions: ArrayValue,
-  values: Map<Value, ReactBytecodeValueNode>,
+  nodeValue: ObjectValue,
+  slotsFunc: ECMAScriptSourceFunctionValue,
+  values: Array<Value>,
 };
 
 export type ReactBytecodeValueNode = {
-  func: ECMAScriptSourceFunctionValue,
-  generator: Generator,
-  slotIndex: NumberValue,
+  slotIndexForValue: NumberValue,
+  slotIndexForNode: NumberValue,
 };
 
 export type AdditionalFunctionInfo = {

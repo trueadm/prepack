@@ -25,7 +25,7 @@ import {
   AbstractObjectValue,
 } from "../values/index.js";
 import { ReactStatistics, type ReactSerializerState, type ReactBytecodeNode } from "../serializer/types.js";
-import { isReactElement, valueIsClassComponent, mapOverArrayValue, valueIsLegacyCreateClassComponent } from "./utils";
+import { isReactElement, valueIsClassComponent, forEachArrayValue, valueIsLegacyCreateClassComponent } from "./utils";
 import { Get } from "../methods/index.js";
 import invariant from "../invariant.js";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
@@ -58,45 +58,44 @@ export class Reconciler {
   render(componentType: ECMAScriptSourceFunctionValue, bytecodeOutput: boolean): Effects | ReactBytecodeNode {
     let bytecodeNode;
     let effects = this.realm.wrapInGlobalEnv(() =>
-      // TODO: (sebmarkbage): You could use the return value of this to detect if there are any mutations on objects other
-      // than newly created ones. Then log those to the error logger. That'll help us track violations in
-      // components. :)
-      this.realm.evaluateForEffects(
-        () => {
-          // initialProps and initialContext are created from Flow types from:
-          // - if a functional component, the 1st and 2nd paramater of function
-          // - if a class component, use this.props and this.context
-          // if there are no Flow types for props or context, we will throw a
-          // FatalError, unless it's a functional component that has no paramater
-          // i.e let MyComponent = () => <div>Hello world</div>
-          try {
-            let initialProps = getInitialProps(this.realm, componentType);
-            let initialContext = getInitialContext(this.realm, componentType);
-            let { result } = this._renderComponent(componentType, initialProps, initialContext, "ROOT", null);
-            this.statistics.optimizedTrees++;
+      this.realm.evaluatePure(() =>
+        this.realm.evaluateForEffects(
+          () => {
+            // initialProps and initialContext are created from Flow types from:
+            // - if a functional component, the 1st and 2nd paramater of function
+            // - if a class component, use this.props and this.context
+            // if there are no Flow types for props or context, we will throw a
+            // FatalError, unless it's a functional component that has no paramater
+            // i.e let MyComponent = () => <div>Hello world</div>
+            try {
+              let initialProps = getInitialProps(this.realm, componentType);
+              let initialContext = getInitialContext(this.realm, componentType);
+              let { result } = this._renderComponent(componentType, initialProps, initialContext, "ROOT", null);
+              this.statistics.optimizedTrees++;
 
-            if (bytecodeOutput) {
-              bytecodeNode = createReactBytecodeNode(this.realm, result);
+              if (bytecodeOutput) {
+                bytecodeNode = createReactBytecodeNode(this.realm, result);
+              }
+              return result;
+            } catch (error) {
+              // if there was a bail-out on the root component in this reconcilation process, then this
+              // should be an invariant as the user has explicitly asked for this component to get folded
+              if (error instanceof ExpectedBailOut) {
+                let diagnostic = new CompilerDiagnostic(
+                  `__registerReactComponentRoot() failed due to - ${error.message}`,
+                  this.realm.currentLocation,
+                  "PP0020",
+                  "FatalError"
+                );
+                this.realm.handleError(diagnostic);
+                throw new FatalError();
+              }
+              throw error;
             }
-            return result;
-          } catch (error) {
-            // if there was a bail-out on the root component in this reconcilation process, then this
-            // should be an invariant as the user has explicitly asked for this component to get folded
-            if (error instanceof ExpectedBailOut) {
-              let diagnostic = new CompilerDiagnostic(
-                `__registerReactComponentRoot() failed due to - ${error.message}`,
-                this.realm.currentLocation,
-                "PP0020",
-                "FatalError"
-              );
-              this.realm.handleError(diagnostic);
-              throw new FatalError();
-            }
-            throw error;
-          }
-        },
-        /*state*/ null,
-        `react component: ${componentType.getName()}`
+          },
+          /*state*/ null,
+          `react component: ${componentType.getName()}`
+        )
       )
     );
     if (bytecodeOutput) {
@@ -349,7 +348,7 @@ export class Reconciler {
     branchStatus: BranchStatusEnum,
     branchState: BranchState | null
   ) {
-    mapOverArrayValue(this.realm, arrayValue, (elementValue, elementPropertyDescriptor) => {
+    forEachArrayValue(this.realm, arrayValue, (elementValue, elementPropertyDescriptor) => {
       elementPropertyDescriptor.value = this._resolveDeeply(elementValue, context, branchStatus, branchState);
     });
   }

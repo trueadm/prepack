@@ -1650,7 +1650,7 @@ export class ResidualHeapSerializer {
   }
 
   _serializeReactBytecodeNode(reactBytecodeNode: ReactBytecodeNode): BabelNodeExpression {
-    let { effects, instructions, values } = reactBytecodeNode;
+    let { effects, generator, instructionsFunc, instructions, nodeValue, slotsFunc, values } = reactBytecodeNode;
     invariant(effects);
     let [
       result,
@@ -1661,27 +1661,28 @@ export class ResidualHeapSerializer {
     ] = effects;
     this.realm.applyEffects([result, new Generator(this.realm), modifiedBindings, modifiedProperties, createdObjects]);
 
-    for (let [value, bytecodeValueNode] of values) {
-      console.log(value);
-      let { func, generator, slotIndex } = bytecodeValueNode;
-      let statements = this._withGeneratorScope(generator, newBody => {
-        let oldCurBody = this.currentFunctionBody;
-        this.currentFunctionBody = newBody;
-        debugger;
-        let context = this._getContext();
-        generator.serialize(context);
-        let node = this.serializeValue(value);
-        this.emitter.emit(node);
-        this.currentFunctionBody = oldCurBody;
-      });
-
-      debugger;
+    let statements = this._withGeneratorScope(generator, newBody => {
+      let oldCurBody = this.currentFunctionBody;
+      this.currentFunctionBody = newBody;
+      let context = this._getContext();
+      generator.serialize(context);
+      this.currentFunctionBody = oldCurBody;
+    });
+    let returnNodes = [];
+    for (let value of values) {
+      returnNodes.push(this.serializeValue(value));
     }
+    statements.push(t.returnStatement(t.arrayExpression(returnNodes)));
+    slotsFunc.$ECMAScriptCode.body = statements;
 
-    let arrayNode = this._serializeValueArray(instructions);
+    let instructionsNode = this._serializeValueArray(instructions);
+    let node = this.serializeValue(nodeValue);
+    instructionsFunc.$ECMAScriptCode.body = [t.returnStatement(instructionsNode)];
+
     this.realm.restoreBindings(modifiedBindings);
     this.realm.restoreProperties(modifiedProperties);
-    return arrayNode;
+
+    return node;
   }
 
   processAdditionalFunctionValues(): Map<FunctionValue, Array<BabelNodeStatement>> {
