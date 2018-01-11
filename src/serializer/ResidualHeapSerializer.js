@@ -13,7 +13,6 @@ import { Realm } from "../realm.js";
 import type { Descriptor, PropertyBinding } from "../types.js";
 import { IsArray, Get } from "../methods/index.js";
 import {
-  ArrayValue,
   BoundFunctionValue,
   ProxyValue,
   SymbolValue,
@@ -54,7 +53,7 @@ import type {
   SerializedBody,
   ClassMethodInstance,
   AdditionalFunctionEffects,
-  ReactBytecodeNode,
+  ReactBytecodeTree,
 } from "./types.js";
 import type { SerializerOptions } from "../options.js";
 import { TimingStatistics, SerializerStatistics, BodyReference } from "./types.js";
@@ -80,6 +79,7 @@ import { To } from "../singletons.js";
 import { ResidualReactElements } from "./ResidualReactElements.js";
 import type { Binding } from "../environment.js";
 import { DeclarativeEnvironmentRecord } from "../environment.js";
+import { withBytecodeComponentEffects } from "../react/bytecode.js";
 
 function commentStatement(text: string) {
   let s = t.emptyStatement();
@@ -103,7 +103,7 @@ export class ResidualHeapSerializer {
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects> | void,
     additionalFunctionValueInfos: Map<FunctionValue, AdditionalFunctionInfo>,
     declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>,
-    reactBytecodeNodes: Map<ArrayValue, ReactBytecodeNode>,
+    reactBytecodeTrees: Map<ObjectValue, ReactBytecodeTree>,
     statistics: SerializerStatistics,
     react: ReactSerializerState
   ) {
@@ -174,7 +174,7 @@ export class ResidualHeapSerializer {
     this.additionalFunctionValuesAndEffects = additionalFunctionValuesAndEffects;
     this.additionalFunctionValueInfos = additionalFunctionValueInfos;
     this.declarativeEnvironmentRecordsBindings = declarativeEnvironmentRecordsBindings;
-    this.reactBytecodeNodes = reactBytecodeNodes;
+    this.reactBytecodeTrees = reactBytecodeTrees;
   }
 
   emitter: Emitter;
@@ -218,7 +218,7 @@ export class ResidualHeapSerializer {
   declarativeEnvironmentRecordsBindings: Map<DeclarativeEnvironmentRecord, Map<string, ResidualFunctionBinding>>;
   react: ReactSerializerState;
   residualReactElements: ResidualReactElements;
-  reactBytecodeNodes: Map<ArrayValue, ReactBytecodeNode>;
+  reactBytecodeTrees: Map<ObjectValue, ReactBytecodeTree>;
 
   // function values nested in additional functions can't delay initializations
   // TODO: revisit this and fix additional functions to be capable of delaying initializations
@@ -1526,14 +1526,8 @@ export class ResidualHeapSerializer {
       }
       return node;
     } else if (IsArray(this.realm, val)) {
-      invariant(val instanceof ArrayValue);
-      if (this.reactBytecodeNodes.has(val)) {
-        let bytecodeNode = this.reactBytecodeNodes.get(val);
-        invariant(bytecodeNode);
-        return this._serializeReactBytecodeNode(bytecodeNode);
-      } else {
-        return this._serializeValueArray(val);
-      }
+      invariant(val instanceof ObjectValue);
+      return this._serializeValueArray(val);
     } else if (val instanceof ProxyValue) {
       return this._serializeValueProxy(val);
     } else if (val instanceof FunctionValue) {
@@ -1542,7 +1536,13 @@ export class ResidualHeapSerializer {
       return this._serializeValueSymbol(val);
     } else {
       invariant(val instanceof ObjectValue);
-      return this.serializeValueObject(val);
+      if (this.reactBytecodeTrees.has(val)) {
+        let reactBytecodeTree = this.reactBytecodeTrees.get(val);
+        invariant(reactBytecodeTree);
+        return this._serializeReactBytecodeTree(reactBytecodeTree);
+      } else {
+        return this.serializeValueObject(val);
+      }
     }
   }
 
@@ -1649,40 +1649,30 @@ export class ResidualHeapSerializer {
     return false;
   }
 
-  _serializeReactBytecodeNode(reactBytecodeNode: ReactBytecodeNode): BabelNodeExpression {
-    let { effects, generator, instructionsFunc, instructions, nodeValue, slotsFunc, values } = reactBytecodeNode;
-    invariant(effects);
-    let [
-      result,
-      ,
-      modifiedBindings,
-      modifiedProperties: Map<PropertyBinding, void | Descriptor>,
-      createdObjects,
-    ] = effects;
-    this.realm.applyEffects([result, new Generator(this.realm), modifiedBindings, modifiedProperties, createdObjects]);
+  _serializeReactBytecodeTree(reactBytecodeTree: ReactBytecodeTree): BabelNodeExpression {
+    let { rootBytecodeComponent } = reactBytecodeTree;
+    let { effects, instructions, instructionsFunc, nodeValue, slotsFunc, values } = rootBytecodeComponent;
 
-    let statements = this._withGeneratorScope(generator, newBody => {
-      let oldCurBody = this.currentFunctionBody;
-      this.currentFunctionBody = newBody;
-      let context = this._getContext();
-      generator.serialize(context);
-      this.currentFunctionBody = oldCurBody;
+    return withBytecodeComponentEffects(this.realm, effects, generator => {
+      let returnNodes = [];
+      let statements = this._withGeneratorScope(generator, newBody => {
+        let oldCurBody = this.currentFunctionBody;
+        this.currentFunctionBody = newBody;
+        let context = this._getContext();
+        generator.serialize(context);
+        for (let value of values) {
+          returnNodes.push(this.serializeValue(value));
+        }
+        this.currentFunctionBody = oldCurBody;
+      });
+
+      statements.push(t.returnStatement(t.arrayExpression(returnNodes)));
+      slotsFunc.$ECMAScriptCode.body = statements;
+
+      let instructionsNode = this.serializeValue(instructions);
+      instructionsFunc.$ECMAScriptCode.body = [t.returnStatement(instructionsNode)];
+      return this.serializeValueObject(nodeValue);
     });
-    let returnNodes = [];
-    for (let value of values) {
-      returnNodes.push(this.serializeValue(value));
-    }
-    statements.push(t.returnStatement(t.arrayExpression(returnNodes)));
-    slotsFunc.$ECMAScriptCode.body = statements;
-
-    let instructionsNode = this._serializeValueArray(instructions);
-    let node = this.serializeValue(nodeValue);
-    instructionsFunc.$ECMAScriptCode.body = [t.returnStatement(instructionsNode)];
-
-    this.realm.restoreBindings(modifiedBindings);
-    this.realm.restoreProperties(modifiedProperties);
-
-    return node;
   }
 
   processAdditionalFunctionValues(): Map<FunctionValue, Array<BabelNodeStatement>> {

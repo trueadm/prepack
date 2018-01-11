@@ -123,7 +123,7 @@ export class Serializer {
     }
 
     let additionalFunctionValuesAndEffects = this.functions.getAdditionalFunctionValuesToEffects();
-    let reactFunctionToBytecodeNodes = this.functions.getReactBytecodeNodes();
+    let reactFunctionToBytecodeTres = this.functions.getReactBytecodeTrees();
     //Deep traversal of the heap to identify the necessary scope of residual functions
     if (timingStats !== undefined) timingStats.deepTraversalTime = Date.now();
     let residualHeapVisitor = new ResidualHeapVisitor(
@@ -131,7 +131,7 @@ export class Serializer {
       this.logger,
       this.modules,
       additionalFunctionValuesAndEffects,
-      reactFunctionToBytecodeNodes
+      reactFunctionToBytecodeTres
     );
     residualHeapVisitor.visitRoots();
     if (this.logger.hasErrors()) return undefined;
@@ -151,7 +151,7 @@ export class Serializer {
         this.logger,
         this.modules,
         additionalFunctionValuesAndEffects,
-        reactFunctionToBytecodeNodes
+        reactFunctionToBytecodeTres
       );
       heapRefCounter.visitRoots();
 
@@ -160,7 +160,7 @@ export class Serializer {
         this.logger,
         this.modules,
         additionalFunctionValuesAndEffects,
-        reactFunctionToBytecodeNodes,
+        reactFunctionToBytecodeTres,
         residualHeapValueIdentifiers,
         heapRefCounter.getResult()
       );
@@ -190,7 +190,7 @@ export class Serializer {
         additionalFunctionValuesAndEffects,
         residualHeapVisitor.additionalFunctionValueInfos,
         residualHeapVisitor.declarativeEnvironmentRecordsBindings,
-        residualHeapVisitor.reactBytecodeNodes,
+        residualHeapVisitor.reactBytecodeTrees,
         this.statistics,
         this.react
       ).serialize();
@@ -217,7 +217,7 @@ export class Serializer {
       additionalFunctionValuesAndEffects,
       residualHeapVisitor.additionalFunctionValueInfos,
       residualHeapVisitor.declarativeEnvironmentRecordsBindings,
-      residualHeapVisitor.reactBytecodeNodes,
+      residualHeapVisitor.reactBytecodeTrees,
       this.statistics,
       this.react
     );

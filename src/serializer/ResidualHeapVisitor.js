@@ -15,7 +15,6 @@ import { Realm } from "../realm.js";
 import type { Descriptor, PropertyBinding, ObjectKind } from "../types.js";
 import { HashSet, IsArray, Get } from "../methods/index.js";
 import {
-  ArrayValue,
   BoundFunctionValue,
   ProxyValue,
   SymbolValue,
@@ -43,7 +42,7 @@ import type {
   FunctionInstance,
   ClassMethodInstance,
   AdditionalFunctionEffects,
-  ReactBytecodeNode,
+  ReactBytecodeTree,
 } from "./types.js";
 import { ClosureRefVisitor } from "./visitors.js";
 import { Logger } from "./logger.js";
@@ -61,6 +60,7 @@ import { Environment, To } from "../singletons.js";
 import { isReactElement, valueIsReactLibraryObject } from "../react/utils.js";
 import { canHoistReactElement } from "../react/hoisting.js";
 import ReactElementSet from "../react/ReactElementSet.js";
+import { withBytecodeComponentEffects } from "../react/bytecode.js";
 
 export type Scope = FunctionValue | Generator;
 
@@ -76,7 +76,7 @@ export class ResidualHeapVisitor {
     logger: Logger,
     modules: Modules,
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects>,
-    reactFunctionToBytecodeNodes: Map<FunctionValue, ReactBytecodeNode>
+    reactFunctionToBytecodeTrees: Map<FunctionValue, ReactBytecodeTree>
   ) {
     invariant(realm.useAbstractInterpretation);
     this.realm = realm;
@@ -97,13 +97,13 @@ export class ResidualHeapVisitor {
     this.delayedVisitGeneratorEntries = [];
     this.shouldVisitReactLibrary = false;
     this.additionalFunctionValuesAndEffects = additionalFunctionValuesAndEffects;
-    this.reactFunctionToBytecodeNodes = reactFunctionToBytecodeNodes;
+    this.reactFunctionToBytecodeTrees = reactFunctionToBytecodeTrees;
     this.equivalenceSet = new HashSet();
     this.reactElementEquivalenceSet = new ReactElementSet(realm, this.equivalenceSet);
     this.additionalFunctionValueInfos = new Map();
     this.inAdditionalFunction = false;
     this.additionalRoots = new Set();
-    this.reactBytecodeNodes = new Map();
+    this.reactBytecodeTrees = new Map();
   }
 
   realm: Realm;
@@ -125,12 +125,12 @@ export class ResidualHeapVisitor {
   additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects>;
   functionInstances: Map<FunctionValue, FunctionInstance>;
   additionalFunctionValueInfos: Map<FunctionValue, AdditionalFunctionInfo>;
-  reactFunctionToBytecodeNodes: Map<FunctionValue, ReactBytecodeNode>;
+  reactFunctionToBytecodeTrees: Map<FunctionValue, ReactBytecodeTree>;
   equivalenceSet: HashSet<AbstractValue>;
   classMethodInstances: Map<FunctionValue, ClassMethodInstance>;
   shouldVisitReactLibrary: boolean;
   reactElementEquivalenceSet: ReactElementSet;
-  reactBytecodeNodes: Map<ArrayValue, ReactBytecodeNode>;
+  reactBytecodeTrees: Map<ObjectValue, ReactBytecodeTree>;
 
   // We only want to add to additionalRoots when we're in an additional function
   inAdditionalFunction: boolean;
@@ -371,7 +371,6 @@ export class ResidualHeapVisitor {
         functionInfo,
         realm: this.realm,
       };
-
       traverse(
         t.file(t.program([t.expressionStatement(t.functionExpression(null, formalParameters, code))])),
         ClosureRefVisitor,
@@ -657,10 +656,10 @@ export class ResidualHeapVisitor {
       if (this.preProcessValue(equivalentValue)) this.visitAbstractValue(equivalentValue);
       this.postProcessValue(equivalentValue);
       return (equivalentValue: any);
-    } else if (val instanceof FunctionValue && this.reactFunctionToBytecodeNodes.has(val)) {
-      let reactBytecodeNode = this.reactFunctionToBytecodeNodes.get(val);
-      invariant(reactBytecodeNode);
-      return (this._visitReactBytecodeNode(reactBytecodeNode): any);
+    } else if (val instanceof FunctionValue && this.reactFunctionToBytecodeTrees.has(val)) {
+      let reactBytecodeTree = this.reactFunctionToBytecodeTrees.get(val);
+      invariant(reactBytecodeTree);
+      return (this._visitReactBytecodeTree(reactBytecodeTree): any);
     }
     if (val instanceof ObjectValue && isReactElement(val)) {
       let equivalentReactElementValue = this.reactElementEquivalenceSet.add(val);
@@ -742,27 +741,20 @@ export class ResidualHeapVisitor {
     });
   }
 
-  _visitReactBytecodeNode(reactBytecodeNode: ReactBytecodeNode) {
-    let { effects, generator, instructions, nodeValue, values } = reactBytecodeNode;
-    invariant(effects);
-    let [
-      result,
-      ,
-      modifiedBindings,
-      modifiedProperties: Map<PropertyBinding, void | Descriptor>,
-      createdObjects,
-    ] = effects;
-    this.realm.applyEffects([result, new Generator(this.realm), modifiedBindings, modifiedProperties, createdObjects]);
-    this.visitValue(instructions);
-    this.visitGenerator(generator);
-    for (let value of values) {
-      this.visitValue(value);
-    }
-    this.visitValue(nodeValue);
-    this.realm.restoreBindings(modifiedBindings);
-    this.realm.restoreProperties(modifiedProperties);
-    this.reactBytecodeNodes.set(instructions, reactBytecodeNode);
-    return instructions;
+  _visitReactBytecodeTree(reactBytecodeTree: ReactBytecodeTree) {
+    let { rootBytecodeComponent } = reactBytecodeTree;
+    let { effects, instructions, nodeValue, values } = rootBytecodeComponent;
+
+    return withBytecodeComponentEffects(this.realm, effects, generator => {
+      this.visitValue(instructions);
+      this.visitGenerator(generator);
+      for (let value of values) {
+        this.visitValue(value);
+      }
+      this.visitValue(nodeValue);
+      this.reactBytecodeTrees.set(rootBytecodeComponent.nodeValue, reactBytecodeTree);
+      return rootBytecodeComponent.nodeValue;
+    });
   }
 
   _visitAdditionalFunction(

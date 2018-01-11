@@ -12,7 +12,7 @@
 import type { Logger } from "./logger.js";
 import type { Modules } from "./modules.js";
 import type { Realm } from "../realm.js";
-import type { ObjectRefCount, AdditionalFunctionEffects, ReactBytecodeNode } from "./types.js";
+import type { ObjectRefCount, AdditionalFunctionEffects, ReactBytecodeTree } from "./types.js";
 
 import invariant from "../invariant.js";
 import { Value, EmptyValue, FunctionValue } from "../values/index.js";
@@ -28,9 +28,9 @@ export class ResidualHeapRefCounter extends ResidualHeapVisitor {
     logger: Logger,
     modules: Modules,
     additionalFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects>,
-    reactFunctionToBytecodeNodes: Map<FunctionValue, ReactBytecodeNode>
+    reactFunctionToBytecodeTrees: Map<FunctionValue, ReactBytecodeTree>
   ) {
-    super(realm, logger, modules, additionalFunctionValuesAndEffects, reactFunctionToBytecodeNodes);
+    super(realm, logger, modules, additionalFunctionValuesAndEffects, reactFunctionToBytecodeTrees);
     this._valueToEdgeRecord = new Map();
     this._path = [];
   }

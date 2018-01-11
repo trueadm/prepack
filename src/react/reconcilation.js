@@ -24,7 +24,7 @@ import {
   ObjectValue,
   AbstractObjectValue,
 } from "../values/index.js";
-import { ReactStatistics, type ReactSerializerState, type ReactBytecodeNode } from "../serializer/types.js";
+import { ReactStatistics, type ReactSerializerState } from "../serializer/types.js";
 import { isReactElement, valueIsClassComponent, forEachArrayValue, valueIsLegacyCreateClassComponent } from "./utils";
 import { Get } from "../methods/index.js";
 import invariant from "../invariant.js";
@@ -32,7 +32,6 @@ import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { BranchState, type BranchStatusEnum } from "./branching.js";
 import { getInitialProps, getInitialContext, createClassInstance, createSimpleClassInstance } from "./components.js";
 import { ExpectedBailOut, SimpleClassBailOut } from "./errors.js";
-import { createReactBytecodeNode } from "./bytecode.js";
 
 export class Reconciler {
   constructor(
@@ -55,9 +54,8 @@ export class Reconciler {
   reactSerializerState: ReactSerializerState;
   simpleClassComponents: Set<Value>;
 
-  render(componentType: ECMAScriptSourceFunctionValue, bytecodeOutput: boolean): Effects | ReactBytecodeNode {
-    let bytecodeNode;
-    let effects = this.realm.wrapInGlobalEnv(() =>
+  render(componentType: ECMAScriptSourceFunctionValue): Effects {
+    return this.realm.wrapInGlobalEnv(() =>
       // TODO: (sebmarkbage): You could use the return value of this to detect if there are any mutations on objects other
       // than newly created ones. Then log those to the error logger. That'll help us track violations in
       // components. :)
@@ -75,9 +73,6 @@ export class Reconciler {
             let { result } = this._renderComponent(componentType, initialProps, initialContext, "ROOT", null);
             this.statistics.optimizedTrees++;
 
-            if (bytecodeOutput) {
-              bytecodeNode = createReactBytecodeNode(this.realm, result);
-            }
             return result;
           } catch (error) {
             // if there was a bail-out on the root component in this reconcilation process, then this
@@ -99,12 +94,6 @@ export class Reconciler {
         `react component: ${componentType.getName()}`
       )
     );
-    if (bytecodeOutput) {
-      invariant(bytecodeNode);
-      bytecodeNode.effects = effects;
-      return bytecodeNode;
-    }
-    return effects;
   }
 
   _renderComplexClassComponent(

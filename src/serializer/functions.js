@@ -14,7 +14,7 @@ import { Completion, ThrowCompletion } from "../completions.js";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
 import invariant from "../invariant.js";
 import { type Effects, type PropertyBindings, Realm } from "../realm.js";
-import type { AdditionalFunctionEffects, ReactBytecodeNode } from "./types.js";
+import type { AdditionalFunctionEffects, ReactBytecodeTree } from "./types.js";
 import type { PropertyBinding } from "../types.js";
 import { ignoreErrorsIn } from "../utils/errors.js";
 import {
@@ -31,6 +31,7 @@ import buildTemplate from "babel-template";
 import { ReactStatistics, type ReactSerializerState } from "./types";
 import { Reconciler } from "../react/reconcilation.js";
 import { valueIsClassComponent, convertSimpleClassComponentToFunctionalComponent } from "../react/utils.js";
+import { createReactBytecodeTree } from "../react/bytecode.js";
 import * as t from "babel-types";
 
 export class Functions {
@@ -39,7 +40,7 @@ export class Functions {
     this.functions = functions;
     this.moduleTracer = moduleTracer;
     this.writeEffects = new Map();
-    this.reactBytecodeNodes = new Map();
+    this.reactBytecodeTrees = new Map();
     this.functionExpressions = new Map();
   }
 
@@ -49,7 +50,7 @@ export class Functions {
   functionExpressions: Map<FunctionValue, string>;
   moduleTracer: ModuleTracer;
   writeEffects: Map<FunctionValue, AdditionalFunctionEffects>;
-  reactBytecodeNodes: Map<FunctionValue, ReactBytecodeNode>;
+  reactBytecodeTrees: Map<FunctionValue, ReactBytecodeTree>;
 
   _generateAdditionalFunctionCallsFromInput(): Array<[FunctionValue, BabelNodeCallExpression]> {
     // lookup functions
@@ -81,8 +82,6 @@ export class Functions {
     }
     return calls;
   }
-
-  // __reactComponentRoots
 
   __generateAdditionalFunctions(globalKey: string) {
     let recordedAdditionalFunctions: Map<FunctionValue, string> = new Map();
@@ -137,11 +136,12 @@ export class Functions {
       // If we're serializing to JSX or createElement, we want to serialize back to
       // an additionalFunction. If we're serializaing to bytecode, we want to serialize
       // out many functions and an array with all the bytecodes/references/strings in
+      let effects = reconciler.render(componentType);
+
       if (this.realm.react.output === "bytecode") {
-        let reactBytecodeEffects = reconciler.render(componentType, true);
-        this.reactBytecodeNodes.set(componentType, ((reactBytecodeEffects: any): ReactBytecodeNode));
+        let reactBytecodeTree = createReactBytecodeTree(this.realm, effects);
+        this.reactBytecodeTrees.set(componentType, ((reactBytecodeTree: any): ReactBytecodeTree));
       } else {
-        let effects = reconciler.render(componentType, false);
         let additionalFunctionEffects = this._createAdditionalEffects(((effects: any): Effects));
         invariant(effects[0] instanceof Value);
         if (simpleClassComponents.has(effects[0])) {
@@ -245,8 +245,8 @@ export class Functions {
     return this.writeEffects;
   }
 
-  getReactBytecodeNodes(): Map<FunctionValue, ReactBytecodeNode> {
-    return this.reactBytecodeNodes;
+  getReactBytecodeTrees(): Map<FunctionValue, ReactBytecodeTree> {
+    return this.reactBytecodeTrees;
   }
 
   reportWriteConflicts(
