@@ -18,6 +18,7 @@ import {
   NumberValue,
   StringValue,
   ReactOpcodeValue,
+  ReactSlotPointerValue,
   ECMAScriptSourceFunctionValue,
 } from "../values/index.js";
 import { Generator } from "../utils/generator.js";
@@ -34,12 +35,17 @@ const ELEMENT_OPEN_DIV = { value: 2, hint: "ELEMENT_OPEN_DIV" };
 const ELEMENT_OPEN_SPAN = { value: 3, hint: "ELEMENT_OPEN_SPAN" };
 const ELEMENT_CLOSE = { value: 4, hint: "ELEMENT_CLOSE" };
 
-const CONDITIONAL = { value: 5, hint: "CONDITIONAL" };
+// const FRAGMENT_OPEN = { value: 5, hint: "FRAGMENT_OPEN" };
+// const FRAGMENT_CLOSE = { value: 6, hint: "FRAGMENT_CLOSE" };
+
+const CONDITIONAL = { value: 7, hint: "CONDITIONAL" };
 
 const PROPERTY_STATIC_CLASS_NAME = { value: 20, hint: "PROPERTY_STATIC_CLASS_NAME" };
 
 const TEXT_STATIC_CONTENT = { value: 26, hint: "TEXT_STATIC_CONTENT" };
-const TEXT_STATIC_NODE = { value: 27, hint: "TEXT_STATIC_NODE" };
+const TEXT_DYNAMIC_CONTENT = { value: 27, hint: "TEXT_DYNAMIC_CONTENT" };
+const TEXT_STATIC_NODE = { value: 28, hint: "TEXT_STATIC_NODE" };
+const TEXT_DYNAMIC_NODE = { value: 29, hint: "TEXT_DYNAMIC_NODE" };
 
 const UNKNOWN_CHILDREN = { value: 34, hint: "UNKNOWN_CHILDREN" };
 const UNKNOWN_NODE = { value: 35, hint: "UNKNOWN_NODE" };
@@ -48,7 +54,16 @@ type BytecodeComponentState = {
   instructions: Array<Value>,
   slotIndex: number,
   valueCache: Map<Value, NumberValue>,
+  nodeCache: Map<Value, NumberValue>,
   values: Array<Value>,
+};
+
+type ConditionalShortCircuit = {
+  status: "NONE" | "EQUAL" | "PARTIALLY_EQUAL",
+  partiallyEqual?: {
+    opcode: ReactOpcodeValue,
+    values: Array<Value>,
+  },
 };
 
 function convertJSArrayToArrayValue(jsArray, realm): ArrayValue {
@@ -61,7 +76,13 @@ function convertJSArrayToArrayValue(jsArray, realm): ArrayValue {
   return arrayValue;
 }
 
-function createOpcode(realm: Realm, code) {
+function changeOpcode(realm: Realm, opcodeValue: ReactOpcodeValue, newCode): ReactOpcodeValue {
+  opcodeValue.value = newCode.value;
+  opcodeValue.hint = newCode.hint;
+  return opcodeValue;
+}
+
+function createOpcode(realm: Realm, code): ReactOpcodeValue {
   return new ReactOpcodeValue(realm, code.value, code.hint);
 }
 
@@ -74,32 +95,106 @@ function createFunction(realm: Realm, formalParameters: Array<BabelNode>): ECMAS
   return func;
 }
 
-function getSlotIndexForValue(realm: Realm, value: Value, bytecodeComponentState: BytecodeComponentState) {
+function getSlotIndexForValue(
+  realm: Realm,
+  value: Value,
+  bytecodeComponentState: BytecodeComponentState
+): ReactSlotPointerValue {
   let slotIndexForValue;
 
   if (bytecodeComponentState.valueCache.has(value)) {
     let cachedValue = bytecodeComponentState.valueCache.get(value);
-    invariant(cachedValue instanceof NumberValue);
+    invariant(cachedValue instanceof ReactSlotPointerValue);
     slotIndexForValue = cachedValue;
   } else {
-    slotIndexForValue = new NumberValue(realm, bytecodeComponentState.slotIndex++);
+    slotIndexForValue = new ReactSlotPointerValue(realm, bytecodeComponentState.slotIndex++);
     bytecodeComponentState.valueCache.set(value, slotIndexForValue);
     bytecodeComponentState.values.push(value);
   }
-
   return slotIndexForValue;
 }
 
-function getSlotIndexForNode(realm: Realm, node: null | Value, bytecodeComponentState: BytecodeComponentState) {
+function getSlotIndexForNode(
+  realm: Realm,
+  node: null | Value,
+  bytecodeComponentState: BytecodeComponentState
+): ReactSlotPointerValue {
   let slotIndexForNode;
 
   if (node === null) {
-    slotIndexForNode = new NumberValue(realm, bytecodeComponentState.slotIndex++);
+    slotIndexForNode = new ReactSlotPointerValue(realm, bytecodeComponentState.slotIndex++);
+    bytecodeComponentState.values.push(realm.intrinsics.null);
+  } else if (bytecodeComponentState.nodeCache.has(node)) {
+    let cachedValue = bytecodeComponentState.nodeCache.get(node);
+    invariant(cachedValue instanceof ReactSlotPointerValue);
+    slotIndexForNode = cachedValue;
+  } else {
+    slotIndexForNode = new ReactSlotPointerValue(realm, bytecodeComponentState.slotIndex++);
+    bytecodeComponentState.nodeCache.set(node, slotIndexForNode);
     bytecodeComponentState.values.push(realm.intrinsics.null);
   }
-  invariant(slotIndexForNode instanceof NumberValue);
+  invariant(slotIndexForNode instanceof ReactSlotPointerValue);
 
   return slotIndexForNode;
+}
+
+function adjustInstructionSlotPointers(
+  instructions: Array<Value>,
+  bytecodeComponentState: BytecodeComponentState
+): Array<Value> {
+  let offset = bytecodeComponentState.slotIndex;
+  let lastOffset = offset;
+
+  for (let i = 0; i < instructions.length; i++) {
+    let item = instructions[i];
+
+    if (item instanceof ReactSlotPointerValue) {
+      item.value += offset;
+      lastOffset = item.value;
+    }
+  }
+  bytecodeComponentState.slotIndex = lastOffset + 1;
+  return instructions;
+}
+
+function getShortCircuitStatusFromInstructions(a: Array<Value>, b: Array<Value>): ConditionalShortCircuit {
+  if (a.length !== b.length) {
+    return { status: "NONE" };
+  }
+  let lastItemWastStatic = false;
+  let instructionsArePartiallyEqual = false;
+  let partiallyEqual;
+
+  for (let i = 0; i < a.length; i++) {
+    let aItem = a[i];
+    let bItem = b[i];
+
+    if (aItem instanceof ReactOpcodeValue && bItem instanceof ReactOpcodeValue && aItem.value === bItem.value) {
+      if (aItem.value === TEXT_STATIC_CONTENT.value || aItem.value === TEXT_STATIC_NODE.value) {
+        lastItemWastStatic = true;
+        instructionsArePartiallyEqual = true;
+        partiallyEqual = {
+          opcode: aItem,
+          values: [],
+        };
+        continue;
+      }
+    } else if (aItem instanceof NumberValue && bItem instanceof NumberValue && aItem.value !== bItem.value) {
+      if (!lastItemWastStatic) {
+        return { status: "NONE" };
+      } else if (partiallyEqual) {
+        partiallyEqual.values.push(aItem, bItem);
+      }
+    } else if (aItem instanceof StringValue && bItem instanceof StringValue && aItem.value !== bItem.value) {
+      if (!lastItemWastStatic) {
+        return { status: "NONE" };
+      } else if (partiallyEqual) {
+        partiallyEqual.values.push(aItem, bItem);
+      }
+    }
+    lastItemWastStatic = false;
+  }
+  return instructionsArePartiallyEqual ? { status: "PARTIALLY_EQUAL", partiallyEqual } : { status: "EQUAL" };
 }
 
 function createInstructionsFromAbstractValue(
@@ -121,12 +216,10 @@ function createInstructionsFromAbstractValue(
         instructions: [],
         slotIndex: 0,
         valueCache: new Map(),
+        nodeCache: new Map(),
         values: [],
       };
       createInstructionsFromValue(realm, subsequentValue, subsequentBytecodeComponentState);
-      const subsequentInstructions = convertJSArrayToArrayValue(subsequentBytecodeComponentState.instructions, realm);
-      const subsequentSlots = convertJSArrayToArrayValue(subsequentBytecodeComponentState.values, realm);
-
       // handle alternative value second
       let alternativeValue = abstractValue.args[2];
       let alternativeBytecodeComponentState = {
@@ -134,28 +227,92 @@ function createInstructionsFromAbstractValue(
         instructions: [],
         slotIndex: 0,
         valueCache: new Map(),
+        nodeCache: new Map(),
         values: [],
       };
       createInstructionsFromValue(realm, alternativeValue, alternativeBytecodeComponentState);
-      const alternativeInstructions = convertJSArrayToArrayValue(alternativeBytecodeComponentState.instructions, realm);
-      const alternativeSlots = convertJSArrayToArrayValue(alternativeBytecodeComponentState.values, realm);
 
-      // put both values together in a conditional
-      invariant(testValue instanceof AbstractValue);
-      let conditionalValue = AbstractValue.createFromConditionalOp(realm, testValue, subsequentSlots, alternativeSlots);
-
-      let slotIndexForTestValue = getSlotIndexForValue(realm, testValue, bytecodeComponentState);
-      let slotIndexForBytecodeNode = getSlotIndexForNode(realm, null, bytecodeComponentState);
-      let slotIndexForBranchSlots = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
-
-      bytecodeComponentState.instructions.push(
-        createOpcode(realm, CONDITIONAL),
-        slotIndexForTestValue,
-        slotIndexForBytecodeNode,
-        slotIndexForBranchSlots,
-        subsequentInstructions,
-        alternativeInstructions
+      // check to see if we can short-circuit a conditonal statement to save bytecode size/CPU cycles
+      let conditionalShortCircuit = getShortCircuitStatusFromInstructions(
+        subsequentBytecodeComponentState.instructions,
+        alternativeBytecodeComponentState.instructions
       );
+
+      if (conditionalShortCircuit.status === "EQUAL") {
+        // add the instructions
+        bytecodeComponentState.instructions.push(
+          ...adjustInstructionSlotPointers(subsequentBytecodeComponentState.instructions, bytecodeComponentState)
+        );
+        // add the values
+        bytecodeComponentState.values.push(...subsequentBytecodeComponentState.values);
+      } else if (conditionalShortCircuit.status === "PARTIALLY_EQUAL") {
+        let { partiallyEqual } = conditionalShortCircuit;
+        invariant(partiallyEqual);
+
+        // put together all values in a conditional
+        invariant(testValue instanceof AbstractValue);
+        let conditionalValue = AbstractValue.createFromConditionalOp(
+          realm,
+          testValue,
+          partiallyEqual.values[0],
+          partiallyEqual.values[1]
+        );
+        let slotIndexForSlots = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
+        let slotIndexForNode = getSlotIndexForNode(realm, isChild ? node : null, bytecodeComponentState);
+
+        // when we have a partial value, it means that we have multple static values that can
+        // be merged into a single dynamic value. so we have to alter opcodes accordingly
+        if (partiallyEqual.opcode.value === TEXT_STATIC_NODE.value) {
+          bytecodeComponentState.instructions.push(
+            changeOpcode(realm, partiallyEqual.opcode, isChild ? TEXT_DYNAMIC_CONTENT : TEXT_DYNAMIC_NODE),
+            slotIndexForSlots,
+            slotIndexForNode
+          );
+        }
+      } else if (conditionalShortCircuit.status === "NONE") {
+        // otherwise we continue to process the instructions in a condition
+        const subsequentInstructions = convertJSArrayToArrayValue(subsequentBytecodeComponentState.instructions, realm);
+        let subsequentSlots;
+        // if the slots are empty, replace with null to avoid unnecessary array allocation
+        if (subsequentBytecodeComponentState.values.length === 0) {
+          subsequentSlots = realm.intrinsics.null;
+        } else {
+          subsequentSlots = convertJSArrayToArrayValue(subsequentBytecodeComponentState.values, realm);
+        }
+        const alternativeInstructions = convertJSArrayToArrayValue(
+          alternativeBytecodeComponentState.instructions,
+          realm
+        );
+        let alternativeSlots;
+        // if the slots are empty, replace with null to avoid unnecessary array allocation
+        if (alternativeBytecodeComponentState.values.length === 0) {
+          alternativeSlots = realm.intrinsics.null;
+        } else {
+          alternativeSlots = convertJSArrayToArrayValue(alternativeBytecodeComponentState.values, realm);
+        }
+
+        // put both values together in a conditional
+        invariant(testValue instanceof AbstractValue);
+        let conditionalValue = AbstractValue.createFromConditionalOp(
+          realm,
+          testValue,
+          subsequentSlots,
+          alternativeSlots
+        );
+
+        let slotIndexForTestValue = getSlotIndexForValue(realm, testValue, bytecodeComponentState);
+        let slotIndexForBytecodeNode = getSlotIndexForNode(realm, null, bytecodeComponentState);
+        let slotIndexForBranchSlots = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
+
+        bytecodeComponentState.instructions.push(
+          createOpcode(realm, CONDITIONAL),
+          slotIndexForTestValue,
+          slotIndexForBytecodeNode,
+          slotIndexForBranchSlots,
+          subsequentInstructions,
+          alternativeInstructions
+        );
+      }
       break;
     case "resolved":
     default:
@@ -251,6 +408,7 @@ export function createReactBytecodeComponent(realm: Realm, effects: Effects): Re
       instructions: [],
       slotIndex: 0,
       valueCache: new Map(),
+      nodeCache: new Map(),
       values: [],
     };
     let slotsFunc = createFunction(realm, [t.identifier("instance"), t.identifier("props")]);
