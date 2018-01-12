@@ -173,7 +173,7 @@ export class Realm {
     this.react = {
       enabled: opts.reactEnabled || false,
       output: opts.reactOutput || "create-element",
-      flowRequired: true,
+      flowRequired: false,
       symbols: new Map(),
       currentOwner: undefined,
       reactLibraryObject: undefined,

@@ -60,11 +60,7 @@ type BytecodeComponentState = {
 
 type ConditionalShortCircuit = {
   status: "NONE" | "EQUAL" | "PARTIALLY_EQUAL",
-  partiallyEqual?: {
-    opcode: ReactOpcodeValue,
-    typeMatch: boolean,
-    values: Array<Value>,
-  },
+  instructions?: Array<Value | Array<Value>>,
 };
 
 function convertJSArrayToArrayValue(jsArray, realm): ArrayValue {
@@ -139,6 +135,16 @@ function getSlotIndexForNode(
   return slotIndexForNode;
 }
 
+function adjustInstructionSlotPointer(
+  value: ReactSlotPointerValue,
+  bytecodeComponentState: BytecodeComponentState
+): Value {
+  let offset = bytecodeComponentState.slotIndex;
+  value.value += offset;
+  bytecodeComponentState.slotIndex = value.value + 1;
+  return value;
+}
+
 function adjustInstructionSlotPointers(
   instructions: Array<Value>,
   bytecodeComponentState: BytecodeComponentState
@@ -158,10 +164,14 @@ function adjustInstructionSlotPointers(
   return instructions;
 }
 
-function getShortCircuitStatusFromInstructions(a: Array<Value>, b: Array<Value>): ConditionalShortCircuit {
+function diffConditionalInstructions(
+  a: Array<Value>,
+  b: Array<Value>,
+  alternativeBytecodeComponentState: BytecodeComponentState
+): ConditionalShortCircuit {
   let lastItemWastStatic = false;
   let instructionsArePartiallyEqual = false;
-  let partiallyEqual;
+  let instructions = [];
   let maxLength = a.length > b.length ? b.length : a.length;
 
   for (let i = 0; i < maxLength; i++) {
@@ -171,52 +181,54 @@ function getShortCircuitStatusFromInstructions(a: Array<Value>, b: Array<Value>)
     if (aItem instanceof ReactOpcodeValue && bItem instanceof ReactOpcodeValue) {
       // if opcodes match
       if (aItem.value === bItem.value) {
+        instructions.push(aItem);
         if (aItem.value === TEXT_STATIC_CONTENT.value || aItem.value === TEXT_STATIC_NODE.value) {
           lastItemWastStatic = true;
-          instructionsArePartiallyEqual = true;
-          partiallyEqual = {
-            opcode: aItem,
-            typeMatch: true,
-            values: [],
-          };
           continue;
         }
       } else {
         // there are some cases we can return partially equal when opcodes don't match
         // for example if they are both the same type but one is dynamic and the other is static
-        // we will need to flag that types do not match too
+        // we can upgrade the static one to the dynamic one and then match them
         if (
           (aItem.value === TEXT_STATIC_NODE.value && bItem.value === TEXT_DYNAMIC_NODE.value) ||
           (aItem.value === TEXT_STATIC_CONTENT.value && bItem.value === TEXT_DYNAMIC_CONTENT.value)
         ) {
           lastItemWastStatic = true;
           instructionsArePartiallyEqual = true;
-          partiallyEqual = {
-            opcode: aItem,
-            typeMatch: false,
-            values: [],
-          };
+          instructions.push(bItem);
+          // now we need to populate the next two instructions
+          let staticValue = a[i + 1];
+          let dynamicSlotPointerValue = b[i + 1];
+          invariant(dynamicSlotPointerValue instanceof ReactSlotPointerValue);
+
+          let dynamicValue = alternativeBytecodeComponentState.values[dynamicSlotPointerValue.value];
+          invariant(dynamicValue instanceof Value);
+          // we also need to push the static value into the next instruction
+          instructions.push([staticValue, dynamicValue]);
+          // then we skip over the entire dynamic text instruction
+          i += 2;
           continue;
         }
       }
     } else if (aItem instanceof NumberValue && bItem instanceof NumberValue && aItem.value !== bItem.value) {
       if (!lastItemWastStatic) {
         return { status: "NONE" };
-      } else if (partiallyEqual) {
-        partiallyEqual.values.push(aItem, bItem);
+      } else {
+        instructions.push([aItem, bItem]);
+        instructionsArePartiallyEqual = true;
       }
     } else if (aItem instanceof StringValue && bItem instanceof StringValue && aItem.value !== bItem.value) {
       if (!lastItemWastStatic) {
         return { status: "NONE" };
-      } else if (partiallyEqual) {
-        partiallyEqual.values.push(aItem, bItem);
+      } else {
+        instructions.push([aItem, bItem]);
+        instructionsArePartiallyEqual = true;
       }
-    } else if (lastItemWastStatic && partiallyEqual) {
-      partiallyEqual.values.push(aItem);
     }
     lastItemWastStatic = false;
   }
-  return instructionsArePartiallyEqual ? { status: "PARTIALLY_EQUAL", partiallyEqual } : { status: "EQUAL" };
+  return instructionsArePartiallyEqual ? { status: "PARTIALLY_EQUAL", instructions } : { status: "EQUAL" };
 }
 
 function createInstructionsFromAbstractValue(
@@ -255,9 +267,10 @@ function createInstructionsFromAbstractValue(
       createInstructionsFromValue(realm, alternativeValue, alternativeBytecodeComponentState);
 
       // check to see if we can short-circuit a conditonal statement to save bytecode size/CPU cycles
-      let conditionalShortCircuit = getShortCircuitStatusFromInstructions(
+      let conditionalShortCircuit = diffConditionalInstructions(
         subsequentBytecodeComponentState.instructions,
-        alternativeBytecodeComponentState.instructions
+        alternativeBytecodeComponentState.instructions,
+        alternativeBytecodeComponentState
       );
 
       if (conditionalShortCircuit.status === "EQUAL") {
@@ -268,28 +281,44 @@ function createInstructionsFromAbstractValue(
         // add the values
         bytecodeComponentState.values.push(...subsequentBytecodeComponentState.values);
       } else if (conditionalShortCircuit.status === "PARTIALLY_EQUAL") {
-        let { partiallyEqual } = conditionalShortCircuit;
-        invariant(partiallyEqual);
+        let { instructions } = conditionalShortCircuit;
+        invariant(instructions);
+        let lastInstruction = null;
 
-        // put together all values in a conditional
-        invariant(testValue instanceof AbstractValue);
-        let conditionalValue = AbstractValue.createFromConditionalOp(
-          realm,
-          testValue,
-          partiallyEqual.values[0],
-          conditionalShortCircuit.typeMatch ? partiallyEqual.values[1] : alternativeValue
-        );
-        let slotIndexForSlots = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
-        let slotIndexForNode = getSlotIndexForNode(realm, isChild ? node : null, bytecodeComponentState);
+        for (let instruction of instructions) {
+          if (instruction instanceof ReactOpcodeValue) {
+            bytecodeComponentState.instructions.push(instruction);
+          } else if (instruction instanceof ReactSlotPointerValue) {
+            bytecodeComponentState.instructions.push(adjustInstructionSlotPointer(instruction, bytecodeComponentState));
+          } else if (Array.isArray(instruction)) {
+            let [a, b] = instruction;
 
-        // when we have a partial value, it means that we have multple static values that can
-        // be merged into a single dynamic value. so we have to alter opcodes accordingly
-        if (partiallyEqual.opcode.value === TEXT_STATIC_NODE.value) {
-          bytecodeComponentState.instructions.push(
-            changeOpcode(realm, partiallyEqual.opcode, isChild ? TEXT_DYNAMIC_CONTENT : TEXT_DYNAMIC_NODE),
-            slotIndexForSlots,
-            slotIndexForNode
-          );
+            // put together all values in a conditional
+            // invariant(testValue instanceof AbstractValue);
+            invariant(testValue instanceof AbstractValue);
+            invariant(a instanceof Value);
+            let conditionalValue = AbstractValue.createFromConditionalOp(realm, testValue, a, b);
+            let slotIndexForConditionalValue = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
+            let slotIndexForNode = getSlotIndexForNode(realm, isChild ? node : null, bytecodeComponentState);
+
+            bytecodeComponentState.instructions.push(slotIndexForConditionalValue, slotIndexForNode);
+
+            // we also need to upgrade the lastInstruction if it was a static one, to the dynamic equivilant
+            if (lastInstruction instanceof ReactOpcodeValue) {
+              switch (lastInstruction.value) {
+                case TEXT_STATIC_NODE.value:
+                  changeOpcode(realm, lastInstruction, isChild ? TEXT_DYNAMIC_CONTENT : TEXT_DYNAMIC_NODE);
+                  break;
+                case TEXT_STATIC_CONTENT.value:
+                  changeOpcode(realm, lastInstruction, TEXT_DYNAMIC_CONTENT);
+                  break;
+                default:
+              }
+            }
+          } else {
+            bytecodeComponentState.instructions.push(instruction);
+          }
+          lastInstruction = instruction;
         }
       } else if (conditionalShortCircuit.status === "NONE") {
         // otherwise we continue to process the instructions in a condition
