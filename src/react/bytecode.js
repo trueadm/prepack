@@ -41,6 +41,7 @@ const ELEMENT_CLOSE = { value: 4, hint: "ELEMENT_CLOSE" };
 const CONDITIONAL = { value: 7, hint: "CONDITIONAL" };
 
 const PROPERTY_STATIC_CLASS_NAME = { value: 20, hint: "PROPERTY_STATIC_CLASS_NAME" };
+const PROPERTY_DYNAMIC_CLASS_NAME = { value: 23, hint: "PROPERTY_DYNAMIC_CLASS_NAME" };
 
 const TEXT_STATIC_CONTENT = { value: 26, hint: "TEXT_STATIC_CONTENT" };
 const TEXT_DYNAMIC_CONTENT = { value: 27, hint: "TEXT_DYNAMIC_CONTENT" };
@@ -52,6 +53,7 @@ const UNKNOWN_NODE = { value: 35, hint: "UNKNOWN_NODE" };
 
 type BytecodeComponentState = {
   instructions: Array<Value>,
+  isBranch: boolean,
   slotIndex: number,
   valueCache: Map<Value, NumberValue>,
   nodeCache: Map<Value, NumberValue>,
@@ -210,6 +212,7 @@ function diffConditionalInstructions(
           i += 2;
           continue;
         }
+        return { status: "NONE" };
       }
     } else if (aItem instanceof NumberValue && bItem instanceof NumberValue && aItem.value !== bItem.value) {
       if (!lastItemWastStatic) {
@@ -236,7 +239,7 @@ function createInstructionsFromAbstractValue(
   abstractValue: AbstractValue,
   node: null | Value,
   bytecodeComponentState: BytecodeComponentState,
-  isChild: boolean
+  opcodeValue: ReactOpcodeValue
 ): void {
   switch (abstractValue.kind) {
     case "conditional":
@@ -248,6 +251,7 @@ function createInstructionsFromAbstractValue(
       let subsequentBytecodeComponentState = {
         children: [],
         instructions: [],
+        isBranch: true,
         slotIndex: 0,
         valueCache: new Map(),
         nodeCache: new Map(),
@@ -259,6 +263,7 @@ function createInstructionsFromAbstractValue(
       let alternativeBytecodeComponentState = {
         children: [],
         instructions: [],
+        isBranch: true,
         slotIndex: 0,
         valueCache: new Map(),
         nodeCache: new Map(),
@@ -274,6 +279,11 @@ function createInstructionsFromAbstractValue(
       );
 
       if (conditionalShortCircuit.status === "EQUAL") {
+        if (!bytecodeComponentState.isBranch) {
+          // ensure the first code is always the main opcode if we're not in a branch
+          invariant(subsequentBytecodeComponentState.instructions.length > 0);
+          subsequentBytecodeComponentState.instructions[0] = opcodeValue;
+        }
         // add the instructions
         bytecodeComponentState.instructions.push(
           ...adjustInstructionSlotPointers(subsequentBytecodeComponentState.instructions, bytecodeComponentState)
@@ -285,7 +295,9 @@ function createInstructionsFromAbstractValue(
         invariant(instructions);
         let lastInstruction = null;
 
-        for (let instruction of instructions) {
+        for (let i = 0; i < instructions.length; i++) {
+          let instruction = instructions[i];
+
           if (instruction instanceof ReactOpcodeValue) {
             bytecodeComponentState.instructions.push(instruction);
           } else if (instruction instanceof ReactSlotPointerValue) {
@@ -299,7 +311,7 @@ function createInstructionsFromAbstractValue(
             invariant(a instanceof Value);
             let conditionalValue = AbstractValue.createFromConditionalOp(realm, testValue, a, b);
             let slotIndexForConditionalValue = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
-            let slotIndexForNode = getSlotIndexForNode(realm, isChild ? node : null, bytecodeComponentState);
+            let slotIndexForNode = getSlotIndexForNode(realm, node ? node : null, bytecodeComponentState);
 
             bytecodeComponentState.instructions.push(slotIndexForConditionalValue, slotIndexForNode);
 
@@ -307,7 +319,7 @@ function createInstructionsFromAbstractValue(
             if (lastInstruction instanceof ReactOpcodeValue) {
               switch (lastInstruction.value) {
                 case TEXT_STATIC_NODE.value:
-                  changeOpcode(realm, lastInstruction, isChild ? TEXT_DYNAMIC_CONTENT : TEXT_DYNAMIC_NODE);
+                  changeOpcode(realm, lastInstruction, node ? TEXT_DYNAMIC_CONTENT : TEXT_DYNAMIC_NODE);
                   break;
                 case TEXT_STATIC_CONTENT.value:
                   changeOpcode(realm, lastInstruction, TEXT_DYNAMIC_CONTENT);
@@ -370,11 +382,7 @@ function createInstructionsFromAbstractValue(
       let slotIndexForValue = getSlotIndexForValue(realm, abstractValue, bytecodeComponentState);
       let slotIndexForNode = getSlotIndexForNode(realm, null, bytecodeComponentState);
 
-      bytecodeComponentState.instructions.push(
-        createOpcode(realm, isChild ? UNKNOWN_CHILDREN : UNKNOWN_NODE),
-        slotIndexForValue,
-        slotIndexForNode
-      );
+      bytecodeComponentState.instructions.push(opcodeValue, slotIndexForValue, slotIndexForNode);
   }
 }
 
@@ -404,7 +412,13 @@ function createInstructionsFromReactElementValue(
         if (propValue instanceof StringValue || propValue instanceof NumberValue) {
           bytecodeComponentState.instructions.push(createOpcode(realm, TEXT_STATIC_CONTENT), propValue);
         } else if (propValue instanceof AbstractValue) {
-          createInstructionsFromAbstractValue(realm, propValue, reactElement, bytecodeComponentState, true);
+          createInstructionsFromAbstractValue(
+            realm,
+            propValue,
+            reactElement,
+            bytecodeComponentState,
+            createOpcode(realm, UNKNOWN_CHILDREN)
+          );
         } else if (isReactElement(propValue)) {
           invariant(propValue instanceof ObjectValue);
           createInstructionsFromReactElementValue(realm, propValue, bytecodeComponentState);
@@ -417,6 +431,14 @@ function createInstructionsFromReactElementValue(
       } else if (propName === "className") {
         if (propValue instanceof StringValue) {
           bytecodeComponentState.instructions.push(createOpcode(realm, PROPERTY_STATIC_CLASS_NAME), propValue);
+        } else if (propValue instanceof AbstractValue) {
+          createInstructionsFromAbstractValue(
+            realm,
+            propValue,
+            reactElement,
+            bytecodeComponentState,
+            createOpcode(realm, PROPERTY_DYNAMIC_CLASS_NAME)
+          );
         }
       }
     }
@@ -431,7 +453,7 @@ function createInstructionsFromValue(realm: Realm, value: Value, bytecodeCompone
   } else if (value instanceof StringValue || value instanceof NumberValue) {
     bytecodeComponentState.instructions.push(createOpcode(realm, TEXT_STATIC_NODE), value);
   } else if (value instanceof AbstractValue) {
-    createInstructionsFromAbstractValue(realm, value, null, bytecodeComponentState, false);
+    createInstructionsFromAbstractValue(realm, value, null, bytecodeComponentState, createOpcode(realm, UNKNOWN_NODE));
   } else {
     // TODO
   }
@@ -457,6 +479,7 @@ export function createReactBytecodeComponent(realm: Realm, effects: Effects): Re
     let bytecodeComponentState = {
       children: [],
       instructions: [],
+      isBranch: false,
       slotIndex: 0,
       valueCache: new Map(),
       nodeCache: new Map(),
