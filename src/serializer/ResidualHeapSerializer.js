@@ -719,7 +719,7 @@ export class ResidualHeapSerializer {
         let error = new CompilerDiagnostic(
           "a class method incorrectly went through the serializeValue() code path",
           val.$ECMAScriptCode.loc,
-          "PP0021",
+          "PP0022",
           "FatalError"
         );
         this.realm.handleError(error);
