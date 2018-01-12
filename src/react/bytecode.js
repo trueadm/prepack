@@ -62,6 +62,7 @@ type ConditionalShortCircuit = {
   status: "NONE" | "EQUAL" | "PARTIALLY_EQUAL",
   partiallyEqual?: {
     opcode: ReactOpcodeValue,
+    typeMatch: boolean,
     values: Array<Value>,
   },
 };
@@ -158,26 +159,45 @@ function adjustInstructionSlotPointers(
 }
 
 function getShortCircuitStatusFromInstructions(a: Array<Value>, b: Array<Value>): ConditionalShortCircuit {
-  if (a.length !== b.length) {
-    return { status: "NONE" };
-  }
   let lastItemWastStatic = false;
   let instructionsArePartiallyEqual = false;
   let partiallyEqual;
+  let maxLength = a.length > b.length ? b.length : a.length;
 
-  for (let i = 0; i < a.length; i++) {
+  for (let i = 0; i < maxLength; i++) {
     let aItem = a[i];
     let bItem = b[i];
 
-    if (aItem instanceof ReactOpcodeValue && bItem instanceof ReactOpcodeValue && aItem.value === bItem.value) {
-      if (aItem.value === TEXT_STATIC_CONTENT.value || aItem.value === TEXT_STATIC_NODE.value) {
-        lastItemWastStatic = true;
-        instructionsArePartiallyEqual = true;
-        partiallyEqual = {
-          opcode: aItem,
-          values: [],
-        };
-        continue;
+    if (aItem instanceof ReactOpcodeValue && bItem instanceof ReactOpcodeValue) {
+      // if opcodes match
+      if (aItem.value === bItem.value) {
+        if (aItem.value === TEXT_STATIC_CONTENT.value || aItem.value === TEXT_STATIC_NODE.value) {
+          lastItemWastStatic = true;
+          instructionsArePartiallyEqual = true;
+          partiallyEqual = {
+            opcode: aItem,
+            typeMatch: true,
+            values: [],
+          };
+          continue;
+        }
+      } else {
+        // there are some cases we can return partially equal when opcodes don't match
+        // for example if they are both the same type but one is dynamic and the other is static
+        // we will need to flag that types do not match too
+        if (
+          (aItem.value === TEXT_STATIC_NODE.value && bItem.value === TEXT_DYNAMIC_NODE.value) ||
+          (aItem.value === TEXT_STATIC_CONTENT.value && bItem.value === TEXT_DYNAMIC_CONTENT.value)
+        ) {
+          lastItemWastStatic = true;
+          instructionsArePartiallyEqual = true;
+          partiallyEqual = {
+            opcode: aItem,
+            typeMatch: false,
+            values: [],
+          };
+          continue;
+        }
       }
     } else if (aItem instanceof NumberValue && bItem instanceof NumberValue && aItem.value !== bItem.value) {
       if (!lastItemWastStatic) {
@@ -191,6 +211,8 @@ function getShortCircuitStatusFromInstructions(a: Array<Value>, b: Array<Value>)
       } else if (partiallyEqual) {
         partiallyEqual.values.push(aItem, bItem);
       }
+    } else if (lastItemWastStatic && partiallyEqual) {
+      partiallyEqual.values.push(aItem);
     }
     lastItemWastStatic = false;
   }
@@ -255,7 +277,7 @@ function createInstructionsFromAbstractValue(
           realm,
           testValue,
           partiallyEqual.values[0],
-          partiallyEqual.values[1]
+          conditionalShortCircuit.typeMatch ? partiallyEqual.values[1] : alternativeValue
         );
         let slotIndexForSlots = getSlotIndexForValue(realm, conditionalValue, bytecodeComponentState);
         let slotIndexForNode = getSlotIndexForNode(realm, isChild ? node : null, bytecodeComponentState);
@@ -415,9 +437,10 @@ export function createReactBytecodeComponent(realm: Realm, effects: Effects): Re
     let instructionsFunc = createFunction(realm, []);
     let nodeValue = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
 
-    Create.CreateDataPropertyOrThrow(realm, nodeValue, "$i", instructionsFunc);
-    Create.CreateDataPropertyOrThrow(realm, nodeValue, "$s", slotsFunc);
-    Create.CreateDataPropertyOrThrow(realm, nodeValue, "_c", realm.intrinsics.null);
+    // we use a, b, c properties to ensure minimum size
+    Create.CreateDataPropertyOrThrow(realm, nodeValue, "a", instructionsFunc);
+    Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", slotsFunc);
+    Create.CreateDataPropertyOrThrow(realm, nodeValue, "c", realm.intrinsics.null);
 
     createInstructionsFromValue(realm, value, bytecodeComponentState);
 
