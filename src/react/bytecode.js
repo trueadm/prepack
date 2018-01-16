@@ -35,21 +35,23 @@ const ELEMENT_OPEN_DIV = { value: 2, hint: "ELEMENT_OPEN_DIV" };
 const ELEMENT_OPEN_SPAN = { value: 3, hint: "ELEMENT_OPEN_SPAN" };
 const ELEMENT_CLOSE = { value: 4, hint: "ELEMENT_CLOSE" };
 
-// const FRAGMENT_OPEN = { value: 5, hint: "FRAGMENT_OPEN" };
-// const FRAGMENT_CLOSE = { value: 6, hint: "FRAGMENT_CLOSE" };
+// const STATIC_FRAGMENT_OPEN = { value: 5, hint: "STATIC_FRAGMENT_OPEN" };
+// const STATIC_FRAGMENT_CLOSE = { value: 6, hint: "STATIC_FRAGMENT_CLOSE" };
 
-const CONDITIONAL = { value: 7, hint: "CONDITIONAL" };
+// const DYNAMIC_FRAGMENT = { value: 7, hint: "DYNAMIC_FRAGMENT" };
 
-const PROPERTY_STATIC_CLASS_NAME = { value: 20, hint: "PROPERTY_STATIC_CLASS_NAME" };
-const PROPERTY_DYNAMIC_CLASS_NAME = { value: 23, hint: "PROPERTY_DYNAMIC_CLASS_NAME" };
+const CONDITIONAL = { value: 9, hint: "CONDITIONAL" };
 
-const TEXT_STATIC_CONTENT = { value: 26, hint: "TEXT_STATIC_CONTENT" };
-const TEXT_DYNAMIC_CONTENT = { value: 27, hint: "TEXT_DYNAMIC_CONTENT" };
-const TEXT_STATIC_NODE = { value: 28, hint: "TEXT_STATIC_NODE" };
-const TEXT_DYNAMIC_NODE = { value: 29, hint: "TEXT_DYNAMIC_NODE" };
+const PROPERTY_STATIC_CLASS_NAME = { value: 22, hint: "PROPERTY_STATIC_CLASS_NAME" };
+const PROPERTY_DYNAMIC_CLASS_NAME = { value: 25, hint: "PROPERTY_DYNAMIC_CLASS_NAME" };
 
-const UNKNOWN_CHILDREN = { value: 34, hint: "UNKNOWN_CHILDREN" };
-const UNKNOWN_NODE = { value: 35, hint: "UNKNOWN_NODE" };
+const TEXT_STATIC_CONTENT = { value: 28, hint: "TEXT_STATIC_CONTENT" };
+const TEXT_DYNAMIC_CONTENT = { value: 29, hint: "TEXT_DYNAMIC_CONTENT" };
+const TEXT_STATIC_NODE = { value: 30, hint: "TEXT_STATIC_NODE" };
+const TEXT_DYNAMIC_NODE = { value: 31, hint: "TEXT_DYNAMIC_NODE" };
+
+const UNKNOWN_CHILDREN = { value: 36, hint: "UNKNOWN_CHILDREN" };
+const UNKNOWN_NODE = { value: 37, hint: "UNKNOWN_NODE" };
 
 type BytecodeComponentState = {
   instructions: Array<Value>,
