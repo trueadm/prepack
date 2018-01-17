@@ -16,7 +16,7 @@ import { AbstractValue, ArrayValue, ObjectValue, StringValue, Value } from "./in
 import type { AbstractValueBuildNodeFunction } from "./AbstractValue.js";
 import { TypesDomain, ValuesDomain } from "../domains/index.js";
 import { IsDataDescriptor, cloneDescriptor, equalDescriptors } from "../methods/index.js";
-import { Join, Widen } from "../singletons.js";
+import { Join, Widen, Leak } from "../singletons.js";
 import type { BabelNodeExpression } from "babel-types";
 import invariant from "../invariant.js";
 import NumberValue from "./NumberValue";
@@ -313,13 +313,14 @@ export default class AbstractObjectValue extends AbstractValue {
   $Get(P: PropertyKeyValue, Receiver: Value): Value {
     if (P instanceof StringValue) P = P.value;
     if (this.values.isTop()) {
-      if (this.isSimpleObject() && this.isIntrinsic()) {
+      let generateAbstractGet = () => {
         let type = Value;
         if (P === "length" && Value.isTypeCompatibleWith(this.getType(), ArrayValue)) type = NumberValue;
+        let object = this.kind === "sentinel ToObject" ? this.args[0] : this;
         return AbstractValue.createTemporalFromBuildFunction(
           this.$Realm,
           type,
-          [this],
+          [object],
           ([o]) => {
             invariant(typeof P === "string");
             return t.memberExpression(o, t.identifier(P));
@@ -327,6 +328,18 @@ export default class AbstractObjectValue extends AbstractValue {
           {
             skipInvariant: true,
           }
+        );
+      };
+      if (this.isSimpleObject() && this.isIntrinsic()) {
+        return generateAbstractGet();
+      } else if (this.$Realm.isInPureScope()) {
+        // This object might have leaked to a getter.
+        Leak.leakValue(this.$Realm, this);
+        // The getter might throw anything.
+        return this.$Realm.evaluateWithPossibleThrowCompletion(
+          generateAbstractGet,
+          TypesDomain.topVal,
+          ValuesDomain.topVal
         );
       }
       AbstractValue.reportIntrospectionError(this, P);

@@ -20,6 +20,7 @@ import {
   StringValue,
   ECMAScriptSourceFunctionValue,
 } from "../values/index.js";
+import type { Descriptor } from "../types";
 import { Get } from "../methods/index.js";
 import { computeBinary } from "../evaluators/BinaryExpression.js";
 import { type ReactSerializerState, type AdditionalFunctionEffects } from "../serializer/types.js";
@@ -186,6 +187,12 @@ export function forEachArrayValue(realm: Realm, array: ObjectValue, mapFunc: Fun
   }
 }
 
+function GetDescriptorForProperty(value: ObjectValue, propertyName: string): ?Descriptor {
+  let object = value.properties.get(propertyName);
+  invariant(object);
+  return object.descriptor;
+}
+
 export function convertSimpleClassComponentToFunctionalComponent(
   realm: Realm,
   componentType: ECMAScriptSourceFunctionValue,
@@ -196,6 +203,20 @@ export function convertSimpleClassComponentToFunctionalComponent(
   invariant(prototype.descriptor);
   prototype.descriptor.configurable = true;
   Properties.DeletePropertyOrThrow(realm, componentType, "prototype");
+
+  // fix the length as we've changed the arguments
+  let lengthProperty = GetDescriptorForProperty(componentType, "length");
+  invariant(lengthProperty);
+  lengthProperty.writable = false;
+  lengthProperty.enumerable = false;
+  lengthProperty.configurable = true;
+  // ensure the length value is set to the new value
+  let lengthValue = Get(realm, componentType, "length");
+  invariant(lengthValue instanceof NumberValue);
+  lengthValue.value = 2;
+
+  // change the function kind
+  componentType.$FunctionKind = "normal";
   // set the prototype back to an object
   componentType.$Prototype = realm.intrinsics.FunctionPrototype;
   // give the function the functional components params
