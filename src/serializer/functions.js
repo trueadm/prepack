@@ -139,7 +139,7 @@ export class Functions {
       let effects = reconciler.render(componentType);
 
       if (this.realm.react.output === "bytecode") {
-        let reactBytecodeTree = createReactBytecodeTree(this.realm, effects);
+        let reactBytecodeTree = createReactBytecodeTree(this.realm, componentType, effects, simpleClassComponents);
         this.reactBytecodeTrees.set(componentType, ((reactBytecodeTree: any): ReactBytecodeTree));
       } else {
         let additionalFunctionEffects = this._createAdditionalEffects(((effects: any): Effects));

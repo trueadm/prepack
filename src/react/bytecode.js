@@ -27,6 +27,7 @@ import { Properties, Create } from "../singletons.js";
 import { Get, IsArray } from "../methods/index.js";
 import { isReactElement, forEachArrayValue } from "./utils.js";
 import invariant from "../invariant.js";
+import { valueIsClassComponent } from "./utils.js";
 import type { FunctionBodyAstNode } from "../types.js";
 import * as t from "babel-types";
 
@@ -41,6 +42,8 @@ const ELEMENT_CLOSE = { value: 4, hint: "ELEMENT_CLOSE" };
 // const DYNAMIC_FRAGMENT = { value: 7, hint: "DYNAMIC_FRAGMENT" };
 
 const CONDITIONAL = { value: 9, hint: "CONDITIONAL" };
+
+const COMPONENT_INSTANCE = { value: 13, hint: "COMPONENT_INSTANCE" };
 
 const PROPERTY_STATIC_CLASS_NAME = { value: 22, hint: "PROPERTY_STATIC_CLASS_NAME" };
 const PROPERTY_DYNAMIC_CLASS_NAME = { value: 25, hint: "PROPERTY_DYNAMIC_CLASS_NAME" };
@@ -461,6 +464,15 @@ function createInstructionsFromValue(realm: Realm, value: Value, bytecodeCompone
   }
 }
 
+function createInstructionsFromClassComponentValue(
+  realm: Realm,
+  componentType: ECMAScriptSourceFunctionValue,
+  value: Value,
+  bytecodeComponentState: BytecodeComponentState
+): void {
+  debugger;
+}
+
 export function withBytecodeComponentEffects(realm: Realm, effects: Effects, f: Function) {
   let [
     value,
@@ -476,7 +488,12 @@ export function withBytecodeComponentEffects(realm: Realm, effects: Effects, f: 
   return val;
 }
 
-export function createReactBytecodeComponent(realm: Realm, effects: Effects): ReactBytecodeComponent {
+export function createReactBytecodeComponent(
+  realm: Realm,
+  componentType: ECMAScriptSourceFunctionValue | null,
+  effects: Effects,
+  simpleClassComponents: Set<Value> | null
+): ReactBytecodeComponent {
   return withBytecodeComponentEffects(realm, effects, (generator, value) => {
     let bytecodeComponentState = {
       children: [],
@@ -496,7 +513,16 @@ export function createReactBytecodeComponent(realm: Realm, effects: Effects): Re
     Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", slotsFunc);
     Create.CreateDataPropertyOrThrow(realm, nodeValue, "c", realm.intrinsics.null);
 
-    createInstructionsFromValue(realm, value, bytecodeComponentState);
+    // when dealing with functional components, simple class components or no components
+    if (
+      (simpleClassComponents !== null && componentType !== null && simpleClassComponents.has(componentType)) ||
+      componentType === null
+    ) {
+      createInstructionsFromValue(realm, value, bytecodeComponentState);
+    } else if (valueIsClassComponent(realm, componentType)) {
+      // when dealing with class components
+      createInstructionsFromClassComponentValue(realm, componentType, value, bytecodeComponentState);
+    }
 
     return {
       children: bytecodeComponentState.children,
@@ -510,8 +536,13 @@ export function createReactBytecodeComponent(realm: Realm, effects: Effects): Re
   });
 }
 
-export function createReactBytecodeTree(realm: Realm, effects: Effects): ReactBytecodeTree {
-  let rootBytecodeComponent = createReactBytecodeComponent(realm, effects);
+export function createReactBytecodeTree(
+  realm: Realm,
+  componentType: ECMAScriptSourceFunctionValue | null,
+  effects: Effects,
+  simpleClassComponents: Set<Value> | null
+): ReactBytecodeTree {
+  let rootBytecodeComponent = createReactBytecodeComponent(realm, componentType, effects, simpleClassComponents);
 
   return {
     rootBytecodeComponent,
