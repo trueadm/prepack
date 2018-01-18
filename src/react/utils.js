@@ -253,3 +253,24 @@ export function convertSimpleClassComponentToFunctionalComponent(
     );
   });
 }
+
+export function removeInvalidNodesFromConstructor(classPrototypeConstructor: ECMAScriptSourceFunctionValue): void {
+  traverse(
+    t.file(t.program([t.functionDeclaration(t.identifier("dummy"), [], classPrototypeConstructor.$ECMAScriptCode)])),
+    {
+      Super(path) {
+        let parentPath = path.parentPath;
+        if (parentPath) {
+          let node = parentPath.node;
+
+          if (t.isCallExpression(node)) {
+            parentPath.remove();
+          }
+        }
+      },
+    },
+    undefined,
+    (undefined: any),
+    undefined
+  );
+}

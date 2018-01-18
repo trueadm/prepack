@@ -1658,7 +1658,7 @@ export class ResidualHeapSerializer {
 
     return withBytecodeComponentEffects(this.realm, effects, generator => {
       let returnNodes = [];
-      let statements = this._withGeneratorScope(generator, newBody => {
+      let slotStatements = this._withGeneratorScope(generator, newBody => {
         let oldCurBody = this.currentFunctionBody;
         this.currentFunctionBody = newBody;
         let context = this._getContext();
@@ -1669,11 +1669,18 @@ export class ResidualHeapSerializer {
         this.currentFunctionBody = oldCurBody;
       });
 
-      statements.push(t.returnStatement(t.arrayExpression(returnNodes)));
-      slotsFunc.$ECMAScriptCode.body = statements;
+      slotStatements.push(t.returnStatement(t.arrayExpression(returnNodes)));
+      slotsFunc.$ECMAScriptCode.body = slotStatements;
 
-      let instructionsNode = this.serializeValue(instructions);
-      instructionsFunc.$ECMAScriptCode.body = [t.returnStatement(instructionsNode)];
+      let instructionsGenerator = new Generator(this.realm);
+      let instructionStatements = this._withGeneratorScope(instructionsGenerator, newBody => {
+        let oldCurBody = this.currentFunctionBody;
+        this.currentFunctionBody = newBody;
+        let instructionsNode = this.serializeValue(instructions);
+        this.emitter.emit(t.returnStatement(instructionsNode));
+        this.currentFunctionBody = oldCurBody;
+      });
+      instructionsFunc.$ECMAScriptCode.body = instructionStatements;
       return this.serializeValueObject(nodeValue);
     });
   }

@@ -25,10 +25,11 @@ import { Generator } from "../utils/generator.js";
 import type { ReactBytecodeTree, ReactBytecodeComponent } from "../serializer/types.js";
 import { Properties, Create } from "../singletons.js";
 import { Get, IsArray } from "../methods/index.js";
-import { isReactElement, forEachArrayValue } from "./utils.js";
+import { isReactElement, forEachArrayValue, removeInvalidNodesFromConstructor } from "./utils.js";
 import invariant from "../invariant.js";
 import { valueIsClassComponent } from "./utils.js";
 import type { FunctionBodyAstNode } from "../types.js";
+import type { BabelNode } from "babel-types";
 import * as t from "babel-types";
 
 const ELEMENT_OPEN = { value: 1, hint: "ELEMENT_OPEN" };
@@ -470,7 +471,13 @@ function createInstructionsFromClassComponentValue(
   value: Value,
   bytecodeComponentState: BytecodeComponentState
 ): void {
-  debugger;
+  let classPrototype = Get(realm, componentType, "prototype");
+  invariant(classPrototype instanceof ObjectValue);
+  let classPrototypeConstructor = Get(realm, classPrototype, "constructor");
+  removeInvalidNodesFromConstructor(classPrototypeConstructor);
+  let constructorFunc = createFunction(realm, [t.identifier("props"), t.identifier("context")]);
+  constructorFunc.$ECMAScriptCode.body = classPrototypeConstructor.$ECMAScriptCode.body;
+  bytecodeComponentState.instructions.push(createOpcode(realm, COMPONENT_INSTANCE), constructorFunc);
 }
 
 export function withBytecodeComponentEffects(realm: Realm, effects: Effects, f: Function) {
@@ -508,11 +515,6 @@ export function createReactBytecodeComponent(
     let instructionsFunc = createFunction(realm, []);
     let nodeValue = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
 
-    // we use a, b, c properties to ensure minimum size
-    Create.CreateDataPropertyOrThrow(realm, nodeValue, "a", instructionsFunc);
-    Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", slotsFunc);
-    Create.CreateDataPropertyOrThrow(realm, nodeValue, "c", realm.intrinsics.null);
-
     // when dealing with functional components, simple class components or no components
     if (
       (simpleClassComponents !== null && componentType !== null && simpleClassComponents.has(componentType)) ||
@@ -523,6 +525,15 @@ export function createReactBytecodeComponent(
       // when dealing with class components
       createInstructionsFromClassComponentValue(realm, componentType, value, bytecodeComponentState);
     }
+
+    // we use a, b, c properties to ensure minimum size
+    Create.CreateDataPropertyOrThrow(realm, nodeValue, "a", instructionsFunc);
+    if (bytecodeComponentState.values.length > 0) {
+      Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", slotsFunc);
+    } else {
+      Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", realm.intrinsics.null);
+    }
+    Create.CreateDataPropertyOrThrow(realm, nodeValue, "c", realm.intrinsics.null);
 
     return {
       children: bytecodeComponentState.children,
