@@ -63,6 +63,8 @@ type BytecodeComponentState = {
   slotIndex: number,
   valueCache: Map<Value, NumberValue>,
   nodeCache: Map<Value, NumberValue>,
+  rootSlotsFunc: ECMAScriptSourceFunctionValue | null,
+  slotsFunc: ECMAScriptSourceFunctionValue | null,
   values: Array<Value>,
 };
 
@@ -261,6 +263,8 @@ function createInstructionsFromAbstractValue(
         slotIndex: 0,
         valueCache: new Map(),
         nodeCache: new Map(),
+        rootSlotsFunc: null,
+        slotsFunc: null,
         values: [],
       };
       createInstructionsFromValue(realm, subsequentValue, subsequentBytecodeComponentState);
@@ -273,6 +277,8 @@ function createInstructionsFromAbstractValue(
         slotIndex: 0,
         valueCache: new Map(),
         nodeCache: new Map(),
+        rootSlotsFunc: null,
+        slotsFunc: null,
         values: [],
       };
       createInstructionsFromValue(realm, alternativeValue, alternativeBytecodeComponentState);
@@ -471,13 +477,46 @@ function createInstructionsFromClassComponentValue(
   value: Value,
   bytecodeComponentState: BytecodeComponentState
 ): void {
+  // When we are dealing with a class component, we set a new "rootSlotsFunc"
+  // to be only that of a [null], so we can store the instance we create.
+  // We then use the original slotsFunc for the component instance instead.
+  let slotIndexForInstance = new ReactSlotPointerValue(realm, 0);
+  let rootSlotsFunc = createFunction(realm, []);
+  rootSlotsFunc.$ECMAScriptCode.body.push(t.returnStatement(t.arrayExpression([t.nullLiteral()])));
+  bytecodeComponentState.rootSlotsFunc = rootSlotsFunc;
+
   let classPrototype = Get(realm, componentType, "prototype");
   invariant(classPrototype instanceof ObjectValue);
   let classPrototypeConstructor = Get(realm, classPrototype, "constructor");
+  invariant(classPrototypeConstructor instanceof ECMAScriptSourceFunctionValue);
   removeInvalidNodesFromConstructor(classPrototypeConstructor);
   let constructorFunc = createFunction(realm, [t.identifier("props"), t.identifier("context")]);
   constructorFunc.$ECMAScriptCode.body = classPrototypeConstructor.$ECMAScriptCode.body;
-  bytecodeComponentState.instructions.push(createOpcode(realm, COMPONENT_INSTANCE), constructorFunc);
+
+  let instanceBytecodeComponentState = {
+    children: [],
+    instructions: [],
+    isBranch: false,
+    slotIndex: 0,
+    valueCache: new Map(),
+    nodeCache: new Map(),
+    rootSlotsFunc: null,
+    slotsFunc: null,
+    values: [],
+  };
+  createInstructionsFromValue(realm, value, instanceBytecodeComponentState);
+  let instanceInstructions = convertJSArrayToArrayValue(instanceBytecodeComponentState.instructions, realm);
+  let slotsFunc = bytecodeComponentState.slotsFunc;
+
+  invariant(slotsFunc instanceof ECMAScriptSourceFunctionValue);
+  bytecodeComponentState.instructions.push(
+    createOpcode(realm, COMPONENT_INSTANCE),
+    slotIndexForInstance,
+    constructorFunc,
+    slotsFunc,
+    instanceInstructions
+  );
+  bytecodeComponentState.values = instanceBytecodeComponentState.values;
 }
 
 export function withBytecodeComponentEffects(realm: Realm, effects: Effects, f: Function) {
@@ -509,9 +548,10 @@ export function createReactBytecodeComponent(
       slotIndex: 0,
       valueCache: new Map(),
       nodeCache: new Map(),
+      rootSlotsFunc: null,
+      slotsFunc: createFunction(realm, [t.identifier("instance"), t.identifier("props")]),
       values: [],
     };
-    let slotsFunc = createFunction(realm, [t.identifier("instance"), t.identifier("props")]);
     let instructionsFunc = createFunction(realm, []);
     let nodeValue = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
 
@@ -528,8 +568,14 @@ export function createReactBytecodeComponent(
 
     // we use a, b, c properties to ensure minimum size
     Create.CreateDataPropertyOrThrow(realm, nodeValue, "a", instructionsFunc);
-    if (bytecodeComponentState.values.length > 0) {
-      Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", slotsFunc);
+    let rootSlotFuncToUse =
+      bytecodeComponentState.rootSlotsFunc ||
+      (bytecodeComponentState.slotsFunc && bytecodeComponentState.values.length > 0) ||
+      null;
+
+    if (rootSlotFuncToUse !== null) {
+      invariant(rootSlotFuncToUse instanceof Value);
+      Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", rootSlotFuncToUse);
     } else {
       Create.CreateDataPropertyOrThrow(realm, nodeValue, "b", realm.intrinsics.null);
     }
@@ -541,7 +587,7 @@ export function createReactBytecodeComponent(
       instructionsFunc,
       instructions: convertJSArrayToArrayValue(bytecodeComponentState.instructions, realm),
       nodeValue,
-      slotsFunc,
+      slotsFunc: bytecodeComponentState.slotsFunc,
       values: bytecodeComponentState.values,
     };
   });

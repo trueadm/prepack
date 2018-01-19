@@ -10,7 +10,7 @@
 /* @flow */
 
 import { Realm } from "../realm.js";
-import type { BabelNode, BabelNodeJSXIdentifier } from "babel-types";
+import type { BabelNode, BabelNodeJSXIdentifier, BabelNodeBlockStatement } from "babel-types";
 import {
   Value,
   NumberValue,
@@ -266,6 +266,22 @@ export function removeInvalidNodesFromConstructor(classPrototypeConstructor: ECM
           if (t.isCallExpression(node)) {
             parentPath.remove();
           }
+        }
+      },
+    },
+    undefined,
+    (undefined: any),
+    undefined
+  );
+}
+
+export function replaceThisReferences(functionBody: BabelNodeBlockStatement): void {
+  traverse(
+    t.file(t.program([t.functionDeclaration(t.identifier("dummy"), [], functionBody)])),
+    {
+      "ThisExpression|Identifier": function(path) {
+        if (t.isThisExpression(path.node) || path.node.name === "this") {
+          path.replaceWith(t.identifier("instance"));
         }
       },
     },

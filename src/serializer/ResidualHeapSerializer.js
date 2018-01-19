@@ -75,6 +75,7 @@ import {
 } from "./utils.js";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { canHoistFunction } from "../react/hoisting.js";
+import { replaceThisReferences } from "../react/utils.js";
 import { To } from "../singletons.js";
 import { ResidualReactElements } from "./ResidualReactElements.js";
 import type { Binding } from "../environment.js";
@@ -1671,6 +1672,7 @@ export class ResidualHeapSerializer {
 
       slotStatements.push(t.returnStatement(t.arrayExpression(returnNodes)));
       slotsFunc.$ECMAScriptCode.body = slotStatements;
+      replaceThisReferences(slotsFunc.$ECMAScriptCode);
 
       let instructionsGenerator = new Generator(this.realm);
       let instructionStatements = this._withGeneratorScope(instructionsGenerator, newBody => {
