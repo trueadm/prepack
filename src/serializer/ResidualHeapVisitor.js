@@ -45,8 +45,8 @@ import type {
   ReactBytecodeTree,
 } from "./types.js";
 import { ClosureRefVisitor } from "./visitors.js";
-import { Logger } from "./logger.js";
-import { Modules } from "./modules.js";
+import { Logger } from "../utils/logger.js";
+import { Modules } from "../utils/modules.js";
 import { ResidualHeapInspector } from "./ResidualHeapInspector.js";
 import {
   commonAncestorOf,
@@ -221,7 +221,9 @@ export class ResidualHeapVisitor {
     let kind = obj.getKind();
     if (proto === this.realm.intrinsics[kind + "Prototype"]) return;
 
-    this.visitValue(proto);
+    if (!obj.$IsClassPrototype || proto !== this.realm.intrinsics.null) {
+      this.visitValue(proto);
+    }
   }
 
   visitConstructorPrototype(func: FunctionValue) {
