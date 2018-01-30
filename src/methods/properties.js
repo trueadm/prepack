@@ -957,7 +957,15 @@ export class PropertiesImplementation {
         // ii. Set base to ToObject(base).
         base = To.ToObjectPartial(realm, base);
       }
-      invariant(base instanceof ObjectValue || base instanceof AbstractObjectValue);
+      if (realm.isInPureScope() && base instanceof AbstractValue) {
+        // create an abstract object value from the abstract value
+        invariant(base.intrinsicName);
+        let abstractObjectValue = AbstractValue.createAbstractObject(realm, base.intrinsicName);
+        debugger;
+        base = V.base = abstractObjectValue;
+      } else {
+        invariant(base instanceof ObjectValue || base instanceof AbstractObjectValue);
+      }
 
       // b. Let succeeded be ? base.[[Set]](GetReferencedName(V), W, GetThisValue(V)).
       let succeeded = base.$SetPartial(Environment.GetReferencedNamePartial(realm, V), W, GetThisValue(realm, V));

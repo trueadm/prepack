@@ -17,7 +17,6 @@ import {
   DeclarativeEnvironmentRecord,
   FunctionEnvironmentRecord,
   ObjectEnvironmentRecord,
-  GlobalEnvironmentRecord,
 } from "../environment.js";
 import {
   BoundFunctionValue,
@@ -105,10 +104,12 @@ class ObjectValueLeakingVisitor {
   objectsTrackedForLeaks: Set<ObjectValue>;
   // Values that has been visited.
   visitedValues: Set<Value>;
+  realm: Realm;
 
-  constructor(objectsTrackedForLeaks: Set<ObjectValue>) {
+  constructor(realm: Realm, objectsTrackedForLeaks: Set<ObjectValue>) {
     this.objectsTrackedForLeaks = objectsTrackedForLeaks;
     this.visitedValues = new Set();
+    this.realm = realm;
   }
 
   mustVisit(val: Value): boolean {
@@ -298,21 +299,17 @@ class ObjectValueLeakingVisitor {
         continue;
       }
 
-      invariant(
-        !(record instanceof GlobalEnvironmentRecord),
-        "we should never reach the global scope because it is never newly created in a pure function."
-      );
-      invariant(record instanceof DeclarativeEnvironmentRecord);
+      if (record instanceof DeclarativeEnvironmentRecord) {
+        this.visitDeclarativeEnvironmentRecordBinding(record, remainingLeakedBindings);
 
-      this.visitDeclarativeEnvironmentRecordBinding(record, remainingLeakedBindings);
-
-      if (record instanceof FunctionEnvironmentRecord) {
-        // If this is a function environment, which is not tracked for leaks,
-        // we can bail out because its bindings should not be mutated in a
-        // pure function.
-        let fn = record.$FunctionObject;
-        if (!this.objectsTrackedForLeaks.has(fn)) {
-          break;
+        if (record instanceof FunctionEnvironmentRecord) {
+          // If this is a function environment, which is not tracked for leaks,
+          // we can bail out because its bindings should not be mutated in a
+          // pure function.
+          let fn = record.$FunctionObject;
+          if (!this.objectsTrackedForLeaks.has(fn)) {
+            break;
+          }
         }
       }
       environment = environment.parent;
@@ -363,7 +360,10 @@ class ObjectValueLeakingVisitor {
         this.visitValueSet(val);
         return;
       default:
-        invariant(kind === "Object", `Object of kind ${kind} is not supported in calls to abstract functions.`);
+        invariant(
+          kind === "Object" || kind === "Array",
+          `Object of kind ${kind} is not supported in calls to abstract functions.`
+        );
         invariant(
           this.$ParameterMap === undefined,
           `Arguments object is not supported in calls to abstract functions.`
@@ -440,7 +440,7 @@ export class LeakImplementation {
       // object can safely be assumed to be deeply immutable as far as this
       // pure function is concerned. However, any mutable object needs to
       // be tainted as possibly having changed to anything.
-      let visitor = new ObjectValueLeakingVisitor(objectsTrackedForLeaks);
+      let visitor = new ObjectValueLeakingVisitor(realm, objectsTrackedForLeaks);
       visitor.visitValue(value);
     }
   }
