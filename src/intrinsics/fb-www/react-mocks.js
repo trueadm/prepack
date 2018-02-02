@@ -296,7 +296,6 @@ export function createMockReact(realm: Realm, reactRequireName: string): ObjectV
     realm.intrinsics.ObjectPrototype,
     "currentOwner"
   ));
-  // this is to get around Flow getting confused
   let factory = reactFactory.$Call;
   invariant(factory !== undefined);
   let reactValue = factory(realm.intrinsics.undefined, [

@@ -13,7 +13,7 @@ import type { Realm } from "./realm.js";
 import initializePrepackGlobals from "./intrinsics/prepack/global.js";
 import initializeDOMGlobals from "./intrinsics/dom/global.js";
 import initializeReactNativeGlobals from "./intrinsics/react-native/global.js";
-import initializeReactMocks from "./intrinsics/fb-www/global.js";
+import initializeFbWWWMocks from "./intrinsics/fb-www/global.js";
 
 export default function(realm: Realm): Realm {
   initializePrepackGlobals(realm);
@@ -22,7 +22,7 @@ export default function(realm: Realm): Realm {
   }
   if (realm.isCompatibleWith("fb-www")) {
     initializeDOMGlobals(realm);
-    initializeReactMocks(realm);
+    initializeFbWWWMocks(realm);
   }
   if (realm.isCompatibleWith(realm.MOBILE_JSC_VERSION) || realm.isCompatibleWith("mobile")) {
     initializeReactNativeGlobals(realm);

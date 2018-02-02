@@ -190,6 +190,7 @@ export class Realm {
       other: new Map(),
       react: undefined,
       reactRelay: undefined,
+      relayRuntime: undefined,
     };
 
     this.errorHandler = opts.errorHandler;
@@ -253,6 +254,7 @@ export class Realm {
     other: Map<string, AbstractValue>,
     react: void | ObjectValue,
     reactRelay: void | ObjectValue,
+    relayRuntime: void | AbstractValue,
   };
 
   $GlobalObject: ObjectValue | AbstractObjectValue;

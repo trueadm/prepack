@@ -1331,7 +1331,7 @@ export class ResidualHeapSerializer {
       t.assignmentExpression(
         "=",
         t.memberExpression(constructorExpression, t.identifier("prototype")),
-        serializedProto
+        classConstructor ? t.memberExpression(serializedProto, t.identifier("prototype")) : serializedProto
       ),
       t.newExpression(constructorExpression, []),
     ]);
@@ -1442,8 +1442,8 @@ export class ResidualHeapSerializer {
               );
             }
             let classFunc = Get(this.realm, proto, "constructor");
-            _classConstructor = classFunc;
-            invariant(_classConstructor instanceof ECMAScriptSourceFunctionValue);
+            classConstructor = classFunc;
+            invariant(classConstructor instanceof ECMAScriptSourceFunctionValue);
             isClass = true;
           }
         }

@@ -14,6 +14,8 @@ let path = require("path");
 let { prepackSources } = require("../lib/prepack-node.js");
 let babel = require("babel-core");
 let React = require("react");
+let ReactRelay = require("react-relay");
+let RelayRuntime = require("relay-runtime");
 let ReactTestRenderer = require("react-test-renderer");
 let { mergeAdacentJSONTextNodes } = require("../lib/utils/json.js");
 /* eslint-disable no-undef */
@@ -59,18 +61,10 @@ function runTestSuite(outputJsx) {
         case "React":
         case "react":
           return React;
+        case "RelayRuntime":
+          return RelayRuntime;
         case "RelayModern":
-          return {
-            QueryRenderer(props) {
-              return props.render({ props: {}, error: null });
-            },
-            createFragmentContainer() {
-              return null;
-            },
-            graphql() {
-              return null;
-            },
-          };
+          return ReactRelay;
         case "FBEnvironment":
           return {};
         default:
@@ -292,6 +286,10 @@ function runTestSuite(outputJsx) {
 
       it("fb-www 5", async () => {
         await runTest(directory, "fb5.js");
+      });
+
+      it.only("fb-www 7", async () => {
+        await runTest(directory, "fb7.js");
       });
     });
   });

@@ -107,6 +107,13 @@ export default function(realm: Realm): void {
           return reactRelay;
         }
         return realm.fbLibraries.reactRelay;
+      } else if (requireNameValValue === "relay-runtime" || requireNameValValue === "RelayRuntime") {
+        if (realm.fbLibraries.relayRuntime === undefined) {
+          let relayRuntime = createAbstract(realm, "function", `require("${requireNameValValue}")`);
+          realm.fbLibraries.relayRuntime = relayRuntime;
+          return relayRuntime;
+        }
+        return realm.fbLibraries.relayRuntime;
       } else {
         let requireVal;
 
