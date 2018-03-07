@@ -147,6 +147,7 @@ export class Reconciler {
               componentType,
               `__optimizeReactComponentTree() React component tree (branch) failed due to - ${error.message}`
             );
+            evaluatedRootNode.message = "evaluation failed on new component tree branch";
             evaluatedRootNode.status = "BAIL-OUT";
           }
           return this.realm.intrinsics.undefined;
@@ -478,6 +479,33 @@ export class Reconciler {
     return "NORMAL";
   }
 
+  _resolveAbstractValue(
+    componentType: Value,
+    value: AbstractValue,
+    context: ObjectValue | AbstractObjectValue,
+    branchStatus: BranchStatusEnum,
+    branchState: BranchState | null,
+    evaluatedNode: ReactEvaluatedNode
+  ) {
+    let length = value.args.length;
+    if (length > 0) {
+      let newBranchState = new BranchState();
+      // TODO investigate what other kinds than "conditional" might be safe to deeply resolve
+      for (let i = 0; i < length; i++) {
+        value.args[i] = this._resolveDeeply(
+          componentType,
+          value.args[i],
+          context,
+          "NEW_BRANCH",
+          newBranchState,
+          evaluatedNode
+        );
+      }
+      newBranchState.applyBranchedLogic(this.realm, this.reactSerializerState);
+    }
+    return value;
+  }
+
   _resolveDeeply(
     componentType: Value,
     value: Value,
@@ -496,23 +524,7 @@ export class Reconciler {
       // terminal values
       return value;
     } else if (value instanceof AbstractValue) {
-      let length = value.args.length;
-      if (length > 0) {
-        let newBranchState = new BranchState();
-        // TODO investigate what other kinds than "conditional" might be safe to deeply resolve
-        for (let i = 0; i < length; i++) {
-          value.args[i] = this._resolveDeeply(
-            componentType,
-            value.args[i],
-            context,
-            "NEW_BRANCH",
-            newBranchState,
-            evaluatedNode
-          );
-        }
-        newBranchState.applyBranchedLogic(this.realm, this.reactSerializerState);
-      }
-      return value;
+      return this._resolveAbstractValue(componentType, value, context, branchStatus, branchState, evaluatedNode);
     }
     // TODO investigate what about other iterables type objects
     if (value instanceof ArrayValue) {
@@ -563,9 +575,10 @@ export class Reconciler {
       if (!(refValue instanceof NullValue)) {
         let evaluatedChildNode = createReactEvaluatedNode("BAIL-OUT", getComponentName(this.realm, typeValue));
         evaluatedNode.children.push(evaluatedChildNode);
-        evaluatedChildNode.status = "BAIL-OUT";
+        let bailOutMessage = `refs are not supported on <Components />`;
+        evaluatedChildNode.message = bailOutMessage;
         this._queueNewComponentTree(typeValue, evaluatedChildNode);
-        this._assignBailOutMessage(reactElement, `Bail-out: refs are not supported on <Components />`);
+        this._assignBailOutMessage(reactElement, bailOutMessage);
         return reactElement;
       }
       if (
@@ -577,7 +590,7 @@ export class Reconciler {
       ) {
         this._assignBailOutMessage(
           reactElement,
-          `Bail-out: props on <Component /> was not not an ObjectValue or an AbstractValue`
+          `props on <Component /> was not not an ObjectValue or an AbstractValue`
         );
         return reactElement;
       }
@@ -587,11 +600,17 @@ export class Reconciler {
         renderStrategy === "NORMAL" &&
         !(typeValue instanceof ECMAScriptSourceFunctionValue || valueIsKnownReactAbstraction(this.realm, typeValue))
       ) {
-        this._assignBailOutMessage(
-          reactElement,
-          `Bail-out: type on <Component /> was not a ECMAScriptSourceFunctionValue`
-        );
-        return reactElement;
+        if (typeValue instanceof AbstractValue) {
+          this._findReactComponentTrees(typeValue, evaluatedNode);
+          return reactElement;
+        } else {
+          let evaluatedChildNode = createReactEvaluatedNode("BAIL-OUT", getComponentName(this.realm, typeValue));
+          evaluatedNode.children.push(evaluatedChildNode);
+          let bailOutMessage = `type on <Component /> was not a ECMAScriptSourceFunctionValue`;
+          evaluatedChildNode.message = bailOutMessage;
+          this._assignBailOutMessage(reactElement, bailOutMessage);
+          return reactElement;
+        }
       } else if (renderStrategy === "FRAGMENT") {
         return resolveChildren();
       }
@@ -632,7 +651,11 @@ export class Reconciler {
         }
 
         if (result instanceof UndefinedValue) {
-          this._assignBailOutMessage(reactElement, `Bail-out: undefined was returned from render`);
+          let evaluatedChildNode = createReactEvaluatedNode("BAIL-OUT", getComponentName(this.realm, typeValue));
+          evaluatedNode.children.push(evaluatedChildNode);
+          let bailOutMessage = `undefined was returned from render`;
+          evaluatedChildNode.message = bailOutMessage;
+          this._assignBailOutMessage(reactElement, bailOutMessage);
           if (branchStatus === "NEW_BRANCH" && branchState) {
             return branchState.captureBranchedValue(typeValue, reactElement);
           }
@@ -659,10 +682,14 @@ export class Reconciler {
             evaluatedNode.children.push(evaluatedChildNode);
             this._queueNewComponentTree(typeValue, evaluatedChildNode);
             if (error instanceof ExpectedBailOut) {
-              this._assignBailOutMessage(reactElement, "Bail-out: " + error.message);
+              evaluatedChildNode.message = error.message;
+              this._assignBailOutMessage(reactElement, error.message);
             } else if (error instanceof FatalError) {
-              this._assignBailOutMessage(reactElement, "Evaluation bail-out");
+              let message = "evaluation failed";
+              evaluatedChildNode.message = message;
+              this._assignBailOutMessage(reactElement, message);
             } else {
+              evaluatedChildNode.message = `unknown error`;
               throw error;
             }
           }
@@ -681,6 +708,7 @@ export class Reconciler {
   _assignBailOutMessage(reactElement: ObjectValue, message: string): void {
     // $BailOutReason is a field on ObjectValue that allows us to specify a message
     // that gets serialized as a comment node during the ReactElement serialization stage
+    message = `Bail-out: ${message}`;
     if (reactElement.$BailOutReason !== undefined) {
       // merge bail out messages if one already exists
       reactElement.$BailOutReason += `, ${message}`;
@@ -719,5 +747,20 @@ export class Reconciler {
       return true;
     }
     return false;
+  }
+
+  _findReactComponentTrees(typeValue: AbstractValue, evaluatedNode: ReactEvaluatedNode): void {
+    for (let componentType of typeValue.args) {
+      if (
+        componentType instanceof ECMAScriptSourceFunctionValue ||
+        valueIsKnownReactAbstraction(this.realm, componentType)
+      ) {
+        let evaluatedChildNode = createReactEvaluatedNode("NEW_TREE", getComponentName(this.realm, typeValue));
+        evaluatedNode.children.push(evaluatedChildNode);
+        this._queueNewComponentTree(componentType, evaluatedChildNode);
+      } else if (componentType instanceof AbstractValue) {
+        this._findReactComponentTrees(componentType, evaluatedNode);
+      }
+    }
   }
 }
