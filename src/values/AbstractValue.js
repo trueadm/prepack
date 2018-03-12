@@ -66,6 +66,9 @@ export default class AbstractValue extends Value {
     this.args = args;
     this.hashValue = hashValue;
     this.kind = optionalArgs ? optionalArgs.kind : undefined;
+    if (buildNode && buildNode.identifier === "_$3B") {
+      debugger;
+    }
   }
 
   hashValue: number;

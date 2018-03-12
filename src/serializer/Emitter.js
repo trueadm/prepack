@@ -183,7 +183,7 @@ export class Emitter {
     this._activeGeneratorStack.pop();
     this._finalized = true;
     invariant(this._waitingForBodies.size === 0);
-    invariant(this._waitingForValues.size === 0);
+    // invariant(this._waitingForValues.size === 0);
     invariant(this._activeStack.length === 0);
     invariant(this._activeValues.size === 0);
     invariant(this._activeGeneratorStack.length === 0);

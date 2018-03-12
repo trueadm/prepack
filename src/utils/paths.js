@@ -11,6 +11,7 @@
 
 import { AbstractValue, ConcreteValue, NullValue, UndefinedValue, Value } from "../values/index.js";
 import invariant from "../invariant.js";
+import { FatalError } from "../errors.js";
 
 export class PathImplementation {
   implies(condition: AbstractValue): boolean {
@@ -80,7 +81,9 @@ export class PathImplementation {
 
 // A path condition is an abstract value that is known to be true in a particular code path
 function pushPathCondition(condition: Value) {
-  invariant(condition.mightNotBeFalse(), "pushing false"); // it is mistake to assert that false is true
+  if (!condition.mightNotBeFalse()) {
+    throw new FatalError("TODO");
+  }
   if (condition instanceof ConcreteValue) return;
   if (!condition.mightNotBeTrue()) return;
   invariant(condition instanceof AbstractValue);
@@ -113,8 +116,9 @@ function pushPathCondition(condition: Value) {
 
 // An inverse path condition is an abstract value that is known to be false in a particular code path
 function pushInversePathCondition(condition: Value) {
-  // it is mistake to assert that true is false.
-  invariant(condition.mightNotBeTrue());
+  if (!condition.mightNotBeTrue()) {
+    throw new FatalError("TODO");
+  }
   if (condition instanceof ConcreteValue) return;
   invariant(condition instanceof AbstractValue);
   if (condition.kind === "||") {
