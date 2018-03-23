@@ -776,23 +776,43 @@ export function getValueFromFunctionCall(
   let funcCall = func.$Call;
   let newCall = func.$Construct;
   let effects;
-  try {
-    effects = realm.evaluateForEffects(
-      () => {
-        invariant(func);
-        if (isConstructor) {
-          invariant(newCall);
-          return newCall(args, func);
-        } else {
-          return funcCall(funcThis, args);
+  let attempt = 0;
+  let originalAbstractValueImpliesMax = realm.abstractValueImpliesMax = 1000;
+
+  const tryToCall = () => {
+    try {
+      return realm.evaluateForEffects(
+        () => {
+          invariant(func);
+          if (isConstructor) {
+            invariant(newCall);
+            return newCall(args, func);
+          } else {
+            return funcCall(funcThis, args);
+          }
+        },
+        null,
+        "getValueFromFunctionCall"
+      );
+    } catch (error) {
+      if (error instanceof FatalError && error.message === "abstract simplification counter hit max") {
+        // try this 3 times then give up
+        if (attempt < 3) {
+          // multiply realm.abstractValueImpliesMax each time by 10
+          attempt++;
+          realm.abstractValueImpliesMax *= 2;
+          return tryToCall();
         }
-      },
-      null,
-      "getValueFromFunctionCall"
-    );
-  } catch (error) {
-    throw error;
-  }
+      }
+      // reset realm.abstractValueImpliesMax to the original value
+      realm.abstractValueImpliesMax = originalAbstractValueImpliesMax;
+      throw error;
+    }
+  };
+
+  effects = tryToCall();
+  // reset realm.abstractValueImpliesMax to the original value
+  realm.abstractValueImpliesMax = originalAbstractValueImpliesMax;
 
   let completion = effects[0];
   if (completion instanceof PossiblyNormalCompletion) {

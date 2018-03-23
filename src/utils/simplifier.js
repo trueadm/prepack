@@ -26,17 +26,21 @@ export default function simplifyAndRefineAbstractValue(
   let savedIsReadOnly = realm.isReadOnly;
   realm.isReadOnly = true;
   let isRootSimplification = false;
+  let pathConditions = realm.pathConditions.slice();
 
   if (!realm.inSimplificationPath) {
     realm.inSimplificationPath = isRootSimplification = true;
   }
   try {
     realm.errorHandler = () => {
-      throw new FatalError();
+      throw new FatalError("abstract simplification counter hit max");
     };
     return simplify(realm, value, isCondition);
   } catch (e) {
     if (e instanceof FatalError) {
+      if (isRootSimplification) {
+        realm.pathConditions = pathConditions;
+      }
       throw e;
     }
     return value;
