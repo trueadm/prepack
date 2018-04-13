@@ -244,7 +244,8 @@ export class Functions {
       func(binding);
     }
     if (result instanceof PossiblyNormalCompletion) {
-      debugger;
+      this._forEachBindingOfEffects(result.alternateEffects, func);
+      this._forEachBindingOfEffects(result.consequentEffects, func);
     }
   }
 
