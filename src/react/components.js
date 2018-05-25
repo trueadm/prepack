@@ -203,10 +203,6 @@ export function createClassInstanceForFirstRenderOnly(
   Properties.Set(realm, instance, "props", props, true);
   // assign context
   Properties.Set(realm, instance, "context", context, true);
-  let state = Get(realm, instance, "state");
-  if (state instanceof AbstractObjectValue || state instanceof ObjectValue) {
-    state.makeFinal();
-  }
   // assign a mocked setState
   let setState = new NativeFunctionValue(realm, undefined, `setState`, 1, (_context, [stateToUpdate, callback]) => {
     invariant(instance instanceof ObjectValue);
@@ -227,7 +223,6 @@ export function createClassInstanceForFirstRenderOnly(
         }
       }
 
-      newState.makeFinal();
       Properties.Set(realm, instance, "state", newState, true);
     }
     if (callback instanceof ECMAScriptSourceFunctionValue && callback.$Call) {
@@ -376,7 +371,6 @@ export function applyGetDerivedStateFromProps(
         );
         newState.makeSimple();
         newState.makePartial();
-        newState.makeFinal();
         let conditional = AbstractValue.createFromLogicalOp(realm, "&&", c, newState);
         return conditional;
       }
@@ -400,7 +394,6 @@ export function applyGetDerivedStateFromProps(
         }
         throw e;
       }
-      newState.makeFinal();
       return newState;
     } else {
       return null;
