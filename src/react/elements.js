@@ -110,9 +110,11 @@ function createPropsObject(
     // do we really need to create an object just for { children }
     if (children !== undefined) {
       let childrenObject = Create.ObjectCreate(realm, realm.intrinsics.ObjectPrototype);
-      // if we have default props, then we need to ensure the children
-      // have keys if they are an array as we're spreading them
-      if (defaultProps !== realm.intrinsics.undefined) {
+      // Apply branching logic to add keys to the children
+      // if they're in an array, otherwise we'll get bad key
+      // errors because we're passing children in a spread
+      // rather than explicitly defining them as children.
+      if (children instanceof ArrayValue) {
         children = applyBranchedLogicValue(realm, children);
       }
       Properties.Set(realm, childrenObject, "children", children, true);
@@ -130,7 +132,8 @@ function createPropsObject(
           [objAssign, props, ...args],
           ([methodNode, ..._args]) => {
             return t.callExpression(methodNode, ((_args: any): Array<any>));
-          }
+          },
+          { isPure: true }
         );
       }
     }
@@ -143,7 +146,8 @@ function createPropsObject(
         [createDefaultPropsHelper(realm), props, defaultProps],
         ([methodNode, ..._args]) => {
           return t.callExpression(methodNode, ((_args: any): Array<any>));
-        }
+        },
+        { isPure: true }
       );
     }
   } else {

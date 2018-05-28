@@ -832,26 +832,8 @@ export function sanitizeReactElementForFirstRenderOnly(realm: Realm, reactElemen
   const sanitizeProps = (): ObjectValue | AbstractObjectValue => {
     // if the props object is abstract, then we just return the value
     if (propsValue instanceof ObjectValue) {
-      let newProps = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
-      for (let [propName, binding] of propsValue.properties) {
-        if (binding && binding.descriptor && binding.descriptor.enumerable) {
-          // check for onSomething prop event handlers, i.e. onClick
-          if (!isEventProp(propName)) {
-            Properties.Set(realm, newProps, propName, Get(realm, propsValue, propName), true);
-          }
-        }
-      }
-      if (propsValue.isPartialObject()) {
-        newProps.makePartial();
-      }
-      if (propsValue.isSimpleObject()) {
-        newProps.makeSimple();
-      }
-      if (realm.react.propsWithNoPartialKeyOrRef.has(propsValue)) {
-        flagPropsWithNoPartialKeyOrRef(realm, newProps);
-      }
-      newProps.makeFinal();
-      return newProps;
+      // clone props with event props
+      return cloneProps(realm, propsValue, true);
     }
     // otherwise, return the original props
     invariant(propsValue instanceof ObjectValue || propsValue instanceof AbstractObjectValue);
@@ -942,4 +924,39 @@ export function createInternalReactElement(
   Create.CreateDataPropertyOrThrow(realm, obj, "_owner", realm.intrinsics.null);
   obj.makeFinal();
   return obj;
+}
+
+export function cloneProps(
+  realm: Realm,
+  props: ObjectValue,
+  excludeEventProps: boolean,
+  excludeChildrenProp: boolean
+): ObjectValue {
+  let clonedProps = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
+
+  for (let [propName, binding] of props.properties) {
+    if (binding && binding.descriptor && binding.descriptor.enumerable) {
+      debugger;
+      if (
+        (excludeEventProps && !isEventProp(propName)) ||
+        (excludeChildrenProp && propName === "children") ||
+        !(!excludeChildrenProp && !excludeEventProps)
+      ) {
+        Properties.Set(realm, clonedProps, propName, getProperty(realm, props, propName), true);
+      }
+    }
+  }
+
+  if (props.isPartialObject()) {
+    clonedProps.makePartial();
+  }
+  if (props.isSimpleObject()) {
+    clonedProps.makeSimple();
+  }
+  if (realm.react.propsWithNoPartialKeyOrRef.has(props)) {
+    flagPropsWithNoPartialKeyOrRef(realm, clonedProps);
+  }
+
+  clonedProps.makeFinal();
+  return clonedProps;
 }

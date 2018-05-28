@@ -551,6 +551,7 @@ export default class ObjectValue extends ConcreteValue {
       this.copyKeys(this.$OwnPropertyKeys(), this, template);
       let result = AbstractValue.createTemporalFromBuildFunction(this.$Realm, ObjectValue, [template], ([x]) => x, {
         skipInvariant: true,
+        isPure: true,
       });
       invariant(result instanceof AbstractObjectValue);
       result.values = new ValuesDomain(template);

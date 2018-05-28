@@ -28,11 +28,11 @@ import {
 } from "../values/index.js";
 import { ReactStatistics, type ReactEvaluatedNode } from "../serializer/types.js";
 import {
+  cloneProps,
   createInternalReactElement,
   createReactEvaluatedNode,
   doNotOptimizeComponent,
   evaluateWithNestedParentEffects,
-  flagPropsWithNoPartialKeyOrRef,
   flattenChildren,
   getComponentName,
   getComponentTypeFromRootValue,
@@ -1015,24 +1015,28 @@ export class Reconciler {
           resolvedChildren = flattenChildren(this.realm, resolvedChildren);
         }
         if (resolvedChildren !== childrenValue) {
-          let newProps = new ObjectValue(this.realm, this.realm.intrinsics.ObjectPrototype);
+          let newProps = cloneProps(this.realm, propsValue, false);
+          //Properties.Set(this.realm, newProps, "children", resolvedChildren, true);
+          // temporalAlias is assigned during Object.assign
+          if (propsValue.temporalAlias !== undefined && propsValue.temporalArgs !== undefined) {
+            let args = [];
 
-          for (let [key, binding] of propsValue.properties) {
-            if (binding && binding.descriptor && binding.descriptor.enumerable && key !== "children") {
-              Properties.Set(this.realm, newProps, key, getProperty(this.realm, propsValue, key), true);
+            for (let arg of propsValue.temporalArgs) {
+              if (arg instanceof ObjectValue) {
+                args.push(arg);
+              }
             }
+            let temporalAlias = AbstractValue.createTemporalFromBuildFunction(
+              this.realm,
+              ObjectValue,
+              args,
+              ([methodNode, targetNode, ...sourceNodes]: Array<BabelNodeExpression>) => {
+                return t.callExpression(methodNode, [targetNode, ...sourceNodes]);
+              },
+              { skipInvariant: true }
+            );
+            newProps.temporalAlias = temporalAlias;
           }
-          Properties.Set(this.realm, newProps, "children", resolvedChildren, true);
-          if (propsValue.isSimpleObject()) {
-            newProps.makeSimple();
-          }
-          if (propsValue.isPartialObject()) {
-            newProps.makePartial();
-          }
-          if (this.realm.react.propsWithNoPartialKeyOrRef.has(propsValue)) {
-            flagPropsWithNoPartialKeyOrRef(this.realm, newProps);
-          }
-          newProps.makeFinal();
           return createInternalReactElement(this.realm, typeValue, keyValue, refValue, newProps);
         }
       }

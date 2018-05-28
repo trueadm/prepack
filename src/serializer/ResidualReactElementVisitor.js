@@ -52,7 +52,11 @@ export class ResidualReactElementVisitor {
         this.residualHeapVisitor.visitValue(refValue);
       },
       visitAbstractOrPartialProps: (propsValue: AbstractValue | ObjectValue) => {
-        this.residualHeapVisitor.visitValue(propsValue);
+        if (propsValue.temporalAlias === undefined) {
+          this.residualHeapVisitor.visitValue(propsValue);
+        } else {
+          this.residualHeapVisitor.visitValue(propsValue.temporalAlias);
+        }
       },
       visitConcreteProps: (propsValue: ObjectValue) => {
         // given that props is a concrete object, it should never be serialized
