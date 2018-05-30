@@ -92,8 +92,6 @@ type AbstractValueKindPrefix =
   | "abstractCounted"
   | "magicGlobalObject";
 
-let x = 0;
-
 export default class AbstractValue extends Value {
   constructor(
     realm: Realm,
@@ -115,10 +113,6 @@ export default class AbstractValue extends Value {
     this.args = args;
     this.hashValue = hashValue;
     this.kind = optionalArgs ? optionalArgs.kind : undefined;
-    this.x = x++;
-    if (this.x === 316266) {
-      debugger
-    }
   }
 
   hashValue: number;
