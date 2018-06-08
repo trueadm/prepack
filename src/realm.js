@@ -33,6 +33,7 @@ import {
   BoundFunctionValue,
   ConcreteValue,
   ECMAScriptSourceFunctionValue,
+  EmptyValue,
   FunctionValue,
   NativeFunctionValue,
   ObjectValue,
@@ -69,7 +70,14 @@ import type { ReactSymbolTypes } from "./react/utils.js";
 import type { BabelNode, BabelNodeSourceLocation, BabelNodeLVal, BabelNodeStatement } from "babel-types";
 import * as t from "babel-types";
 
-export type BindingEntry = { leakedImmutableValue: void | Value, hasLeaked: boolean, value: void | Value };
+export type BindingEntry = {
+  leakedImmutableValue: void | Value,
+  hasLeaked: boolean,
+  value: void | Value,
+  previousLeakedImmutableValue: void | Value,
+  previousHasLeaked: boolean,
+  previousValue: void | Value,
+};
 export type Bindings = Map<Binding, BindingEntry>;
 export type EvaluationResult = Completion | Reference | Value;
 export type PropertyBindings = Map<PropertyBinding, void | Descriptor>;
@@ -727,7 +735,7 @@ export class Realm {
         result = func(effects);
         return this.intrinsics.undefined;
       } finally {
-        this.restoreBindings(effects.modifiedBindings);
+        this.undoBindings(effects.modifiedBindings);
         this.restoreProperties(effects.modifiedProperties);
         invariant(!effects.canBeApplied);
         effects.canBeApplied = true;
@@ -817,10 +825,10 @@ export class Realm {
         // Roll back the state changes
         if (this.savedCompletion !== undefined) this.stopEffectCaptureAndUndoEffects(this.savedCompletion);
         if (result !== undefined) {
-          this.restoreBindings(result.modifiedBindings);
+          this.undoBindings(result.modifiedBindings);
           this.restoreProperties(result.modifiedProperties);
         } else {
-          this.restoreBindings(this.modifiedBindings);
+          this.undoBindings(this.modifiedBindings);
           this.restoreProperties(this.modifiedProperties);
         }
         this.generator = saved_generator;
@@ -907,10 +915,10 @@ export class Realm {
       };
       let effects1 = this.evaluateForEffects(f, undefined, "evaluateForFixpointEffects/1");
       while (true) {
-        this.restoreBindings(effects1.modifiedBindings);
+        this.redoBindings(effects1.modifiedBindings);
         this.restoreProperties(effects1.modifiedProperties);
         let effects2 = this.evaluateForEffects(f, undefined, "evaluateForFixpointEffects/2");
-        this.restoreBindings(effects1.modifiedBindings);
+        this.undoBindings(effects1.modifiedBindings);
         this.restoreProperties(effects1.modifiedProperties);
         if (Widen.containsEffects(effects1, effects2)) {
           // effects1 includes every value present in effects2, so doing another iteration using effects2 will not
@@ -1225,10 +1233,10 @@ export class Realm {
     } else {
       let savedEffects = this.savedCompletion.savedEffects;
       invariant(savedEffects !== undefined);
-      this.restoreBindings(savedEffects.modifiedBindings);
+      this.redoBindings(savedEffects.modifiedBindings);
       this.restoreProperties(savedEffects.modifiedProperties);
       Join.updatePossiblyNormalCompletionWithSubsequentEffects(this, priorCompletion, savedEffects);
-      this.restoreBindings(savedEffects.modifiedBindings);
+      this.undoBindings(savedEffects.modifiedBindings);
       this.restoreProperties(savedEffects.modifiedProperties);
       invariant(this.savedCompletion !== undefined);
       this.savedCompletion.savedEffects = undefined;
@@ -1261,7 +1269,7 @@ export class Realm {
 
   stopEffectCaptureAndUndoEffects(completion: PossiblyNormalCompletion) {
     // Roll back the state changes
-    this.restoreBindings(this.modifiedBindings);
+    this.undoBindings(this.modifiedBindings);
     this.restoreProperties(this.modifiedProperties);
 
     // Restore saved state
@@ -1290,7 +1298,7 @@ export class Realm {
     if (appendGenerator) this.appendGenerator(generator, leadingComment);
 
     // Restore modifiedBindings
-    this.restoreBindings(modifiedBindings);
+    this.applyBindings(modifiedBindings);
     this.restoreProperties(modifiedProperties);
 
     // track modifiedBindings
@@ -1350,9 +1358,10 @@ export class Realm {
     }
   }
 
-  // Record the current value of binding in this.modifiedBindings unless
-  // there is already an entry for binding.
-  recordModifiedBinding(binding: Binding, value?: Value): Binding {
+  recordModifiedBinding(
+    binding: Binding,
+    changes: { leakedImmutableValue?: Value, hasLeaked?: boolean, value?: Value }
+  ): void {
     const isDefinedInsidePureFn = root => {
       let context = this.getRunningContext();
       let { lexicalEnvironment: env, function: func } = context;
@@ -1377,7 +1386,7 @@ export class Realm {
     if (
       this.modifiedBindings !== undefined &&
       !this.modifiedBindings.has(binding) &&
-      value !== undefined &&
+      changes.value !== undefined &&
       this.isInPureScope() &&
       this.reportSideEffectCallback !== undefined
     ) {
@@ -1387,7 +1396,7 @@ export class Realm {
         !(env instanceof DeclarativeEnvironmentRecord) ||
         (env instanceof DeclarativeEnvironmentRecord && !isDefinedInsidePureFn(env))
       ) {
-        this.reportSideEffectCallback("MODIFIED_BINDING", binding, value.expressionLocation);
+        this.reportSideEffectCallback("MODIFIED_BINDING", binding, changes.value.expressionLocation);
       }
     }
 
@@ -1396,14 +1405,29 @@ export class Realm {
       throw new FatalError("Trying to modify a binding in read-only realm");
     }
 
-    if (this.modifiedBindings !== undefined && !this.modifiedBindings.has(binding)) {
-      this.modifiedBindings.set(binding, {
-        leakedImmutableValue: binding.leakedImmutableValue,
-        hasLeaked: binding.hasLeaked,
-        value: binding.value,
-      });
+    let modifiedBindings = this.modifiedBindings;
+    if (modifiedBindings !== undefined) {
+      let bindingValues = modifiedBindings.get(binding);
+      if (bindingValues === undefined) {
+        modifiedBindings.set(binding, {
+          leakedImmutableValue: changes.leakedImmutableValue || binding.leakedImmutableValue,
+          hasLeaked: changes.hasLeaked || binding.hasLeaked,
+          value: changes.value || binding.value,
+          previousLeakedImmutableValue: binding.leakedImmutableValue,
+          previousHasLeaked: binding.hasLeaked,
+          previousValue: binding.value,
+        });
+      } else {
+        bindingValues.leakedImmutableValue = changes.leakedImmutableValue || binding.leakedImmutableValue;
+        bindingValues.hasLeaked = changes.hasLeaked || binding.hasLeaked;
+        bindingValues.value = changes.value || binding.value;
+        if (changes.value instanceof EmptyValue) bindingValues.value = undefined;
+      }
     }
-    return binding;
+    binding.leakedImmutableValue = changes.leakedImmutableValue || binding.leakedImmutableValue;
+    binding.hasLeaked = changes.hasLeaked || binding.hasLeaked;
+    binding.value = changes.value || binding.value;
+    if (changes.value instanceof EmptyValue) binding.value = undefined;
   }
 
   callReportObjectGetOwnProperties(ob: ObjectValue): void {
@@ -1470,23 +1494,28 @@ export class Realm {
     return result;
   }
 
-  // Restores each Binding in the given map to the value it
-  // had when it was entered into the map and updates the map to record
-  // the value the Binding had just before the call to this method.
-  restoreBindings(modifiedBindings: void | Bindings) {
+  applyBindings(modifiedBindings: void | Bindings) {
     if (modifiedBindings === undefined) return;
     modifiedBindings.forEach(({ leakedImmutableValue, hasLeaked, value }, binding, m) => {
-      let liv = binding.leakedImmutableValue;
-      let l = binding.hasLeaked;
-      let v = binding.value;
-      binding.leakedImmutableValue = liv;
+      this.recordModifiedBinding(binding, { leakedImmutableValue, hasLeaked, value });
+    });
+  }
+
+  redoBindings(modifiedBindings: void | Bindings) {
+    if (modifiedBindings === undefined) return;
+    modifiedBindings.forEach(({ leakedImmutableValue, hasLeaked, value }, binding, m) => {
+      binding.leakedImmutableValue = leakedImmutableValue;
       binding.hasLeaked = hasLeaked;
       binding.value = value;
-      m.set(binding, {
-        leakedImmutableValue: liv,
-        hasLeaked: l,
-        value: v,
-      });
+    });
+  }
+
+  undoBindings(modifiedBindings: void | Bindings) {
+    if (modifiedBindings === undefined) return;
+    modifiedBindings.forEach(({ previousLeakedImmutableValue, previousHasLeaked, previousValue }, binding, m) => {
+      binding.leakedImmutableValue = previousLeakedImmutableValue;
+      binding.hasLeaked = previousHasLeaked;
+      binding.value = previousValue;
     });
   }
 

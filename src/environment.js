@@ -63,12 +63,14 @@ export function havocBinding(binding: Binding) {
   let realm = binding.environment.realm;
   let value = binding.value;
   if (!binding.hasLeaked) {
-    realm.recordModifiedBinding(binding).hasLeaked = true;
     if (value !== undefined) {
+      let changes = { value: realm.intrinsics.undefined, hasLeaked: true };
       let realmGenerator = realm.generator;
       if (realmGenerator !== undefined) realmGenerator.emitBindingAssignment(binding, value);
-      if (binding.mutable !== true) binding.leakedImmutableValue = value;
-      binding.value = realm.intrinsics.undefined;
+      if (!binding.mutable) (changes: any).leakedImmutableValue = value;
+      realm.recordModifiedBinding(binding, changes);
+    } else {
+      realm.recordModifiedBinding(binding, { hasLeaked: true });
     }
   }
 }
@@ -193,7 +195,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
     invariant(!envRec.bindings[N], `shouldn't have the binding ${N}`);
 
     // 3. Create a mutable binding in envRec for N and record that it is uninitialized. If D is true, record that the newly created binding may be deleted by a subsequent DeleteBinding call.
-    this.bindings[N] = realm.recordModifiedBinding({
+    let binding = {
       initialized: false,
       mutable: true,
       deletable: D,
@@ -201,7 +203,9 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
       name: N,
       isGlobal: isGlobal,
       hasLeaked: false,
-    });
+    };
+    this.bindings[N] = binding;
+    realm.recordModifiedBinding(binding, {});
 
     // 4. Return NormalCompletion(empty).
     return realm.intrinsics.undefined;
@@ -228,7 +232,8 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
       isGlobal: isGlobal,
       hasLeaked: false,
     };
-    this.bindings[N] = skipRecord ? binding : realm.recordModifiedBinding(binding);
+    this.bindings[N] = binding;
+    if (!skipRecord) realm.recordModifiedBinding(binding, {});
 
     // 4. Return NormalCompletion(empty).
     return realm.intrinsics.undefined;
@@ -245,7 +250,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
     invariant(binding && binding.initialized !== true, `shouldn't have the binding ${N}`);
 
     // 3. Set the bound value for N in envRec to V.
-    if (!skipRecord) this.realm.recordModifiedBinding(binding, V).value = V;
+    if (!skipRecord) this.realm.recordModifiedBinding(binding, { value: V });
     else binding.value = V;
 
     // 4. Record that the binding for N in envRec has been initialized.
@@ -296,7 +301,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
         invariant(realm.generator);
         realm.generator.emitBindingAssignment(binding, V);
       } else {
-        realm.recordModifiedBinding(binding, V).value = V;
+        realm.recordModifiedBinding(binding, { value: V });
       }
     } else {
       // 6. Else,
@@ -344,13 +349,15 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
     let envRec = this;
 
     // 2. Assert: envRec has a binding for the name that is the value of N.
-    invariant(envRec.bindings[N], "expected binding to exist");
+    let binding = envRec.bindings[N];
+    invariant(binding !== undefined, "expected binding to exist");
 
     // 3. If the binding for N in envRec cannot be deleted, return false.
-    if (!envRec.bindings[N].deletable) return false;
+    if (!binding.deletable) return false;
 
     // 4. Remove the binding for N from envRec.
-    this.realm.recordModifiedBinding(envRec.bindings[N]).value = undefined;
+    this.realm.recordModifiedBinding(binding, { value: this.realm.intrinsics.empty });
+    binding.value = undefined;
     delete envRec.bindings[N];
 
     // 5. Return true.
