@@ -68,6 +68,7 @@ export type RealmOptions = {
   strictlyMonotonicDateNow?: boolean,
   timeout?: number,
   maxStackDepth?: number,
+  membraneEnabled?: boolean,
   reactEnabled?: boolean,
   reactOutput?: ReactOutputTypes,
   reactVerbose?: boolean,

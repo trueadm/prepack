@@ -68,6 +68,7 @@ import { Environment, Functions, Join, Properties, To, Widen, Path } from "./sin
 import type { ReactSymbolTypes } from "./react/utils.js";
 import type { BabelNode, BabelNodeSourceLocation, BabelNodeLVal, BabelNodeStatement } from "babel-types";
 import * as t from "babel-types";
+import { Membrane } from "./utils/Membrane.js";
 
 export type BindingEntry = {
   leakedImmutableValue: void | Value,
@@ -266,6 +267,7 @@ export class Realm {
       verbose: opts.reactVerbose || false,
     };
 
+    this.membrane = opts.membraneEnabled ? new Membrane(this) : undefined;
     this.alreadyDescribedLocations = new WeakMap();
     this.stripFlow = opts.stripFlow || false;
 
@@ -362,6 +364,7 @@ export class Realm {
     usedReactElementKeys: Set<string>,
     verbose: boolean,
   };
+  membrane: void | Membrane;
   alreadyDescribedLocations: WeakMap<FunctionValue | BabelNodeSourceLocation, string | void>;
   stripFlow: boolean;
 

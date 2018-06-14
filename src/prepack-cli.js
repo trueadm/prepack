@@ -120,6 +120,7 @@ function run(
     residual: false,
     profile: false,
     reactEnabled: false,
+    membraneEnabled: false,
   };
 
   let reproArguments = [];
