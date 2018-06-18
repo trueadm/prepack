@@ -186,12 +186,18 @@ export class Reconciler {
     let originalStatistics = Object.assign({}, this.statistics);
     let nestedOptimizedClosures = this.nestedOptimizedClosures.slice();
     let branchedComponentTrees = this.branchedComponentTrees.slice();
+    let originalComponentTreeState = Object.assign({}, this.componentTreeState);
+    let originalAlreadyEvaluatedRootNodes = new Map(this.alreadyEvaluatedRootNodes);
+    let originalAlreadyEvaluatedNestedClosures = new Set(this.alreadyEvaluatedNestedClosures);
 
     const resetState = () => {
       // Reset statistics
       Object.assign(this.statistics, originalStatistics);
       this.nestedOptimizedClosures = nestedOptimizedClosures;
       this.branchedComponentTrees = branchedComponentTrees;
+      this.alreadyEvaluatedRootNodes = originalAlreadyEvaluatedRootNodes;
+      this.alreadyEvaluatedNestedClosures = originalAlreadyEvaluatedNestedClosures;
+      this.componentTreeState = originalComponentTreeState;
       evaluatedRootNode.children = [];
       evaluatedRootNode.message = "";
     };
