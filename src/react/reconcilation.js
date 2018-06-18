@@ -182,38 +182,42 @@ export class Reconciler {
         invariant(false, "resolveReactComponentTree error not handled correctly");
       }
     };
-
-    let originalStatistics = Object.assign({}, this.statistics);
-    let nestedOptimizedClosures = this.nestedOptimizedClosures.slice();
-    let branchedComponentTrees = this.branchedComponentTrees.slice();
-    let originalComponentTreeState = Object.assign({}, this.componentTreeState);
-    let originalAlreadyEvaluatedRootNodes = new Map(this.alreadyEvaluatedRootNodes);
-    let originalAlreadyEvaluatedNestedClosures = new Set(this.alreadyEvaluatedNestedClosures);
-
-    const resetState = () => {
-      // Reset statistics
-      Object.assign(this.statistics, originalStatistics);
-      this.nestedOptimizedClosures = nestedOptimizedClosures;
-      this.branchedComponentTrees = branchedComponentTrees;
-      this.alreadyEvaluatedRootNodes = originalAlreadyEvaluatedRootNodes;
-      this.alreadyEvaluatedNestedClosures = originalAlreadyEvaluatedNestedClosures;
-      this.componentTreeState = originalComponentTreeState;
-      evaluatedRootNode.children = [];
-      evaluatedRootNode.message = "";
-    };
-
+    const revertCapturedChanges = this._captureReconcilationMutations(evaluatedRootNode);
     let effects = this.realm.evaluatePure(
       () =>
         Membrane.analyzeAndOptimizeFunctionCalls(
           this.realm,
           resolveComponentTree,
           `react component: ${getComponentName(this.realm, componentType)}`,
-          resetState
+          revertCapturedChanges
         ),
       this._handleReportedSideEffect
     );
     this._handleNestedOptimizedClosuresFromEffects(effects, evaluatedRootNode);
     return effects;
+  }
+
+  _captureReconcilationMutations(evaluatedRootNode: ReactEvaluatedNode): () => void {
+    let statistics = Object.assign({}, this.statistics);
+    let nestedOptimizedClosures = this.nestedOptimizedClosures.slice();
+    let branchedComponentTrees = this.branchedComponentTrees.slice();
+    let componentTreeState = Object.assign({}, this.componentTreeState);
+    let alreadyEvaluatedRootNodes = new Map(this.alreadyEvaluatedRootNodes);
+    let alreadyEvaluatedNestedClosures = new Set(this.alreadyEvaluatedNestedClosures);
+    let savedEvaluatedRootNode = evaluatedRootNode;
+
+    const revertCapturedChanges = () => {
+      Object.assign(this.statistics, statistics);
+      this.nestedOptimizedClosures = nestedOptimizedClosures;
+      this.branchedComponentTrees = branchedComponentTrees;
+      this.alreadyEvaluatedRootNodes = alreadyEvaluatedRootNodes;
+      this.alreadyEvaluatedNestedClosures = alreadyEvaluatedNestedClosures;
+      this.componentTreeState = componentTreeState;
+      evaluatedRootNode.children = [];
+      evaluatedRootNode.message = savedEvaluatedRootNode.message;
+    };
+
+    return revertCapturedChanges;
   }
 
   _handleNestedOptimizedClosuresFromEffects(effects: Effects, evaluatedNode: ReactEvaluatedNode) {
