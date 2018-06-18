@@ -33,6 +33,7 @@ import type { AdditionalFunctionEffects, WriteEffects } from "./types";
 import { convertConfigObjectToReactComponentTreeConfig, valueIsKnownReactAbstraction } from "../react/utils.js";
 import { applyOptimizedReactComponents, optimizeReactComponentTreeRoot } from "../react/optimizing.js";
 import * as t from "babel-types";
+import { Membrane } from "../singletons.js";
 
 type AdditionalFunctionEntry = {
   value: ECMAScriptSourceFunctionValue | AbstractValue,
@@ -200,7 +201,7 @@ export class Functions {
       invariant(functionValue instanceof ECMAScriptSourceFunctionValue);
       let call = this._callOfFunction(functionValue);
       let effects: Effects = this.realm.evaluatePure(() =>
-        this.realm.evaluateForEffectsInGlobalEnv(call, undefined, "additional function")
+        Membrane.analyzeAndOptimizeFunctionCalls(this.realm, call, "additional function")
       );
       invariant(effects);
       let additionalFunctionEffects = createAdditionalEffects(

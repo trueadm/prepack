@@ -35,7 +35,7 @@ import { GetIterator, HasSomeCompatibleType, IsCallable, IsPropertyKey, Iterator
 import { GeneratorStart } from "../methods/generator.js";
 import { ReturnCompletion, AbruptCompletion, ThrowCompletion, ForkedAbruptCompletion } from "../completions.js";
 import { GetTemplateObject, GetV, GetThisValue } from "../methods/get.js";
-import { Create, Environment, Functions, Join, Havoc, To, Widen } from "../singletons.js";
+import { Create, Environment, Functions, Havoc, Join, Membrane, To, Widen } from "../singletons.js";
 import invariant from "../invariant.js";
 import type { BabelNodeExpression, BabelNodeSpreadElement, BabelNodeTemplateLiteral } from "babel-types";
 import * as t from "babel-types";
@@ -511,7 +511,9 @@ export function EvaluateDirectCall(
   // 1. Let argList be ? ArgumentListEvaluation(arguments).
   let argList = ArgumentListEvaluation(realm, strictCode, env, args);
 
-  return EvaluateDirectCallWithArgList(realm, strictCode, env, ref, func, thisValue, argList, tailPosition);
+  return Membrane.EvaluateDirectCall(realm, func, argList, thisValue, () =>
+    EvaluateDirectCallWithArgList(realm, strictCode, env, ref, func, thisValue, argList, tailPosition)
+  );
 }
 
 export function EvaluateDirectCallWithArgList(

@@ -14,6 +14,7 @@ import type {
   EnvironmentType,
   FunctionType,
   HavocType,
+  MembraneType,
   JoinType,
   PathType,
   PropertiesType,
@@ -27,6 +28,7 @@ export let Create: CreateType = (null: any);
 export let Environment: EnvironmentType = (null: any);
 export let Functions: FunctionType = (null: any);
 export let Havoc: HavocType = (null: any);
+export let Membrane: MembraneType = (null: any);
 export let Join: JoinType = (null: any);
 export let Path: PathType = (null: any);
 export let Properties: PropertiesType = (null: any);
@@ -49,6 +51,10 @@ export function setFunctions(singleton: FunctionType) {
 
 export function setHavoc(singleton: HavocType) {
   Havoc = singleton;
+}
+
+export function setMembrane(singleton: MembraneType) {
+  Membrane = singleton;
 }
 
 export function setJoin(singleton: JoinType) {

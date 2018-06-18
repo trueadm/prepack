@@ -90,6 +90,7 @@ function runTestSuite(outputJsx, shouldTranspileSource) {
     inlineExpressions: true,
     invariantLevel: 0,
     stripFlow: true,
+    membraneEnabled: true,
   };
 
   async function expectReconcilerFatalError(func) {

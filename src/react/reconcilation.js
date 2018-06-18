@@ -50,7 +50,7 @@ import {
 } from "./utils";
 import { Get } from "../methods/index.js";
 import invariant from "../invariant.js";
-import { Properties } from "../singletons.js";
+import { Membrane, Properties } from "../singletons.js";
 import { FatalError, CompilerDiagnostic } from "../errors.js";
 import {
   type BranchStatusEnum,
@@ -183,16 +183,28 @@ export class Reconciler {
       }
     };
 
-    let effects = this.realm.wrapInGlobalEnv(() =>
-      this.realm.evaluatePure(
-        () =>
-          this.realm.evaluateForEffects(
-            resolveComponentTree,
-            /*state*/ null,
-            `react component: ${getComponentName(this.realm, componentType)}`
-          ),
-        this._handleReportedSideEffect
-      )
+    let originalStatistics = Object.assign({}, this.statistics);
+    let nestedOptimizedClosures = this.nestedOptimizedClosures.slice();
+    let branchedComponentTrees = this.branchedComponentTrees.slice();
+
+    const resetState = () => {
+      // Reset statistics
+      Object.assign(this.statistics, originalStatistics);
+      this.nestedOptimizedClosures = nestedOptimizedClosures;
+      this.branchedComponentTrees = branchedComponentTrees;
+      evaluatedRootNode.children = [];
+      evaluatedRootNode.message = "";
+    };
+
+    let effects = this.realm.evaluatePure(
+      () =>
+        Membrane.analyzeAndOptimizeFunctionCalls(
+          this.realm,
+          resolveComponentTree,
+          `react component: ${getComponentName(this.realm, componentType)}`,
+          resetState
+        ),
+      this._handleReportedSideEffect
     );
     this._handleNestedOptimizedClosuresFromEffects(effects, evaluatedRootNode);
     return effects;

@@ -51,6 +51,7 @@ import type {
 import type { Bindings, Effects, EvaluationResult, PropertyBindings, CreatedObjects, Realm } from "./realm.js";
 import { CompilerDiagnostic } from "./errors.js";
 import type { Severity } from "./errors.js";
+import type { BabelNodeCallExpression } from "babel-types";
 
 export const ElementSize = {
   Float32: 4,
@@ -370,6 +371,22 @@ export type PathType = {
 
 export type HavocType = {
   value(realm: Realm, value: Value, loc: ?BabelNodeSourceLocation): void,
+};
+
+export type MembraneType = {
+  analyzeAndOptimizeFunctionCalls(
+    realm: Realm,
+    original: () => Value | Completion,
+    generatorName: string,
+    resetStateFunc: () => void
+  ): Value | Completion,
+  EvaluateDirectCall(
+    realm: Realm,
+    func: Value,
+    argumentList: Array<Value>,
+    thisValue: Value,
+    original: () => Value
+  ): Value,
 };
 
 export type PropertiesType = {
