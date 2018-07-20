@@ -32,11 +32,12 @@ import { ResidualHeapValueIdentifiers } from "./ResidualHeapValueIdentifiers.js"
 import { LazyObjectsSerializer } from "./LazyObjectsSerializer.js";
 import * as t from "@babel/types";
 import type { BabelNodeFile } from "@babel/types";
-import { ResidualHeapRefCounter } from "./ResidualHeapRefCounter";
-import { ResidualHeapGraphGenerator } from "./ResidualHeapGraphGenerator";
+import { ResidualHeapRefCounter } from "./ResidualHeapRefCounter.js";
+import { ResidualHeapGraphGenerator } from "./ResidualHeapGraphGenerator.js";
 import { Referentializer } from "./Referentializer.js";
 import { Get } from "../methods/index.js";
 import { ObjectValue, Value } from "../values/index.js";
+import { ResidualHeapDiffer } from "./ResidualHeapDiffer.js";
 
 export class Serializer {
   constructor(realm: Realm, serializerOptions: SerializerOptions = {}) {
@@ -172,6 +173,11 @@ export class Serializer {
         // get released when this function returns.
 
         let additionalFunctionValuesAndEffects = this.functions.getAdditionalFunctionValuesToEffects();
+        if (this.realm.react.verbose) {
+          this.logger.logInformation(`Diffing evaluated nodes...`);
+        }
+        let differ = new ResidualHeapDiffer(this.realm, this.logger, additionalFunctionValuesAndEffects);
+        differ.visitRoots();
 
         // Deep traversal of the heap to identify the necessary scope of residual functions
         let preludeGenerator = this.realm.preludeGenerator;
@@ -183,6 +189,7 @@ export class Serializer {
           preludeGenerator.createNameGenerator("__get_scope_binding_"),
           preludeGenerator.createNameGenerator("__leaked_")
         );
+
         if (this.realm.react.verbose) {
           this.logger.logInformation(`Visiting evaluated nodes...`);
         }

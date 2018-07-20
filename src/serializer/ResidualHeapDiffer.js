@@ -24,17 +24,25 @@ export class ResidualHeapDiffer {
     this.realm = realm;
     this.logger = logger;
     this.additionalFunctionValuesAndEffects = optimizedFunctionValuesAndEffects;
+    this.similarShapeGenerators = new Map();
+    this.shapeEquivalenceByEntrySize = new Map();
   }
   realm: Realm;
   logger: Logger;
   optimizedFunctionValuesAndEffects: Map<FunctionValue, AdditionalFunctionEffects>;
+  similarShapeGenerators: Map<Generator, any>;
+  shapeEquivalenceByEntrySize: Map<number, any>;
 
   visitRoots(): void {
     this._visitGenerator(this.realm.generator);
   }
 
   _visitGenerator(generator: Generator) {
+    let entries = generator._entries;
+
+    for (let entry of entries) {
+
+    }
     debugger;
-    generator.visit();
   }
 }
