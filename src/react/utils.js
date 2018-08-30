@@ -790,7 +790,6 @@ export function getValueFromFunctionCall(
   let funcCall = func.$Call;
   let newCall = func.$Construct;
   let completion;
-  let createdObjects = realm.createdObjects;
   try {
     let value;
     if (isConstructor) {
@@ -806,8 +805,6 @@ export function getValueFromFunctionCall(
     } else {
       throw error;
     }
-  } finally {
-    invariant(createdObjects === realm.createdObjects, "realm.createdObjects was not correctly restored");
   }
   return realm.returnOrThrowCompletion(completion);
 }
