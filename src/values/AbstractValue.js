@@ -35,6 +35,7 @@ import {
   StringValue,
   SymbolValue,
   UndefinedValue,
+  EmptyValue,
   Value,
 } from "./index.js";
 import { hashString, hashBinary, hashCall, hashTernary, hashUnary } from "../methods/index.js";
@@ -495,6 +496,7 @@ export default class AbstractValue extends Value {
   mightNotBeUndefined(): boolean {
     let valueType = this.getType();
     if (valueType === UndefinedValue) return false;
+    if (valueType === EmptyValue) return false;
     if (valueType !== PrimitiveValue && valueType !== Value) return true;
     if (this.kind === "abstractConcreteUnion") {
       for (let arg of this.args) if (arg.mightNotBeUndefined()) return true;
