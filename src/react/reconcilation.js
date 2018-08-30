@@ -134,9 +134,7 @@ function setContextCurrentValue(contextObject: ObjectValue | AbstractObjectValue
   }
 }
 
-function throwUnsupportedSideEffectError(msg: string) {
-  throw new UnsupportedSideEffect(msg);
-}
+function throwUnsupportedSideEffectError(msg: string) {}
 
 export class Reconciler {
   constructor(
