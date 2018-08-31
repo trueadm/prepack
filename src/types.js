@@ -365,11 +365,11 @@ export type PathType = {
 export class PathConditions {
   add(c: AbstractValue): void {}
 
-  implies(e: AbstractValue): boolean {
+  implies(e: AbstractValue, depth: number = 0): boolean {
     return false;
   }
 
-  impliesNot(e: AbstractValue): boolean {
+  impliesNot(e: AbstractValue, depth: number = 0): boolean {
     return false;
   }
 
