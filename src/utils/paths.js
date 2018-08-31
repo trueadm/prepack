@@ -83,15 +83,15 @@ export class PathConditionsImplementation extends PathConditions {
     return this._assumedConditions;
   }
 
-  refineBaseConditons(realm: Realm): void {
-    if (realm.abstractValueImpliesMax > 0) return;
+  refineBaseConditons(realm: Realm, totalRefinements: number = 0): void {
+    let total = totalRefinements;
     let refine = (condition: AbstractValue) => {
       let refinedCondition = realm.simplifyAndRefineAbstractCondition(condition);
       if (refinedCondition !== condition) {
         if (!refinedCondition.mightNotBeFalse()) throw new InfeasiblePathError();
         if (refinedCondition instanceof AbstractValue) {
           this.add(refinedCondition);
-          // These might have different answers now that we've add another path condition
+          // These might have different answers now that we're adding another path condition
           this._failedImplications = undefined;
           this._failedNegativeImplications = undefined;
         }
@@ -103,13 +103,14 @@ export class PathConditionsImplementation extends PathConditions {
         this._baseConditions = undefined;
         for (let assumedCondition of savedBaseConditions._assumedConditions) {
           if (assumedCondition.kind === "||") {
+            if (++total > 4) break;
             refine(assumedCondition);
           }
         }
       } finally {
         this._baseConditions = savedBaseConditions;
       }
-      savedBaseConditions.refineBaseConditons(realm);
+      savedBaseConditions.refineBaseConditons(realm, total);
     }
   }
 }
