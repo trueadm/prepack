@@ -116,6 +116,34 @@ it("Simple 21", () => {
   runTest(__dirname + "/FunctionalComponents/simple-21.js");
 });
 
+it("Simple 22", () => {
+  runTest(__dirname + "/FunctionalComponents/simple-22.js");
+});
+
+it("Simple 23", () => {
+  runTest(__dirname + "/FunctionalComponents/simple-23.js");
+});
+
+it("Simple 24", () => {
+  runTest(__dirname + "/FunctionalComponents/simple-24.js");
+});
+
+it("Simple 25", () => {
+  runTest(__dirname + "/FunctionalComponents/simple-25.js");
+});
+
+it("Bound type", () => {
+  runTest(__dirname + "/FunctionalComponents/bound-type.js");
+});
+
+it("Bound type 2", () => {
+  runTest(__dirname + "/FunctionalComponents/bound-type2.js");
+});
+
+it("React.Children.map", () => {
+  runTest(__dirname + "/FunctionalComponents/react-children-map.js");
+});
+
 it("Two roots", () => {
   runTest(__dirname + "/FunctionalComponents/two-roots.js");
 });
@@ -254,6 +282,10 @@ it("Dynamic context", () => {
 
 it("React.cloneElement", () => {
   runTest(__dirname + "/FunctionalComponents/clone-element.js");
+});
+
+it("React.cloneElement 2", () => {
+  runTest(__dirname + "/FunctionalComponents/clone-element2.js");
 });
 
 it("Return text", () => {

@@ -50,11 +50,13 @@ import type {
   BabelUnaryOperator,
   BabelBinaryOperator,
   BabelLogicalOperator,
+  BabelNodeTemplateElement,
 } from "@babel/types";
 import { concretize, Join, Utils } from "../singletons.js";
 import type { SerializerOptions } from "../options.js";
-import type { ShapeInformationInterface } from "../types.js";
+import type { PathConditions, ShapeInformationInterface } from "../types.js";
 import { PreludeGenerator } from "./PreludeGenerator.js";
+import { PropertyDescriptor } from "../descriptors.js";
 
 export type OperationDescriptorType =
   | "ABSTRACT_FROM_TEMPLATE"
@@ -144,9 +146,9 @@ export type OperationDescriptorData = {
   binding?: Binding, // used by GET_BINDING
   propertyBinding?: PropertyBinding, // used by LOGICAL_PROPERTY_ASSIGNMENT
   boundName?: BabelNodeIdentifier, // used by FOR_IN
-  callTemplate?: () => BabelNodeExpression, // used by EMIT_CALL and EMIT_CALL_AND_CAPTURE_RESULT
+  callFunctionRef?: string, // used by EMIT_CALL and EMIT_CALL_AND_CAPTURE_RESULT
   concreteComparisons?: Array<Value>, // used by FULL_INVARIANT_ABSTRACT
-  desc?: Descriptor, // used by DEFINE_PROPERTY
+  descriptor?: Descriptor, // used by DEFINE_PROPERTY
   generator?: Generator, // used by DO_WHILE
   generators?: Array<Generator>, // used by JOIN_GENERATORS
   id?: string, // used by IDENTIFIER
@@ -160,10 +162,10 @@ export type OperationDescriptorData = {
   propertyGetter?: SupportedGraphQLGetters, // used by ABSTRACT_OBJECT_GET
   propRef?: ReferenceName | AbstractValue, // used by CALL_BAILOUT, and then only if string
   object?: ObjectValue, // used by DEFINE_PROPERTY
-  quasis?: Array<any>, // used by REACT_SSR_TEMPLATE_LITERAL
+  quasis?: Array<BabelNodeTemplateElement>, // used by REACT_SSR_TEMPLATE_LITERAL
   state?: "MISSING" | "PRESENT" | "DEFINED", // used by PROPERTY_INVARIANT
   thisArg?: BaseValue | Value, // used by CALL_BAILOUT
-  template?: PreludeGenerator => ({}) => BabelNodeExpression, // used by ABSTRACT_FROM_TEMPLATE
+  templateSource?: string, // used by ABSTRACT_FROM_TEMPLATE
   typeComparisons?: Set<typeof Value>, // used by FULL_INVARIANT_ABSTRACT
   usesThis?: boolean, // used by FOR_STATEMENT_FUNC
   value?: Value, // used by DO_WHILE, CONDITIONAL_PROPERTY_ASSIGNMENT, LOGICAL_PROPERTY_ASSIGNMENT, LOCAL_ASSIGNMENT, CONDITIONAL_THROW, EMIT_PROPERTY_ASSIGNMENT
@@ -224,6 +226,19 @@ export type VisitEntryCallbacks = {|
   visitBindingAssignment: (Binding, Value) => Value,
 |};
 
+export type CustomGeneratorEntryType = "MODIFIED_PROPERTY" | "MODIFIED_BINDING" | "RETURN" | "BINDING_ASSIGNMENT";
+
+export interface Printer {
+  printGeneratorEntry(
+    declared: void | AbstractValue | ObjectValue,
+    type: OperationDescriptorType | CustomGeneratorEntryType,
+    args: Array<Value>,
+    data: OperationDescriptorData,
+    metadata: { isPure: boolean, mutatesOnly: void | Array<Value> }
+  ): void;
+  printGenerator(generator: Generator, label?: string): void;
+}
+
 export class GeneratorEntry {
   constructor(realm: Realm) {
     // We increment the index of every TemporalOperationEntry created.
@@ -233,6 +248,10 @@ export class GeneratorEntry {
     // for each AST node, then each would have a sequential index as to its
     // position of how it was evaluated in the BlockSstatement.
     this.index = realm.temporalEntryCounter++;
+  }
+
+  print(printer: Printer): void {
+    invariant(false, "GeneratorEntry is an abstract base class");
   }
 
   visit(callbacks: VisitEntryCallbacks, containingGenerator: Generator): boolean {
@@ -262,7 +281,6 @@ export type TemporalOperationEntryArgs = {
   declared?: AbstractValue | ObjectValue,
   args: Array<Value>,
   operationDescriptor: OperationDescriptor,
-  dependencies?: Array<Generator>,
   isPure?: boolean,
   mutatesOnly?: Array<Value>,
 };
@@ -283,9 +301,16 @@ export class TemporalOperationEntry extends GeneratorEntry {
   declared: void | AbstractValue | ObjectValue;
   args: Array<Value>;
   operationDescriptor: OperationDescriptor;
-  dependencies: void | Array<Generator>;
   isPure: void | boolean;
   mutatesOnly: void | Array<Value>;
+
+  print(printer: Printer): void {
+    const operationDescriptor = this.operationDescriptor;
+    printer.printGeneratorEntry(this.declared, operationDescriptor.type, this.args, this.operationDescriptor.data, {
+      isPure: !!this.isPure,
+      mutatesOnly: this.mutatesOnly,
+    });
+  }
 
   toDisplayJson(depth: number): DisplayResult {
     if (depth <= 0) return `TemporalOperation${this.index}`;
@@ -310,9 +335,43 @@ export class TemporalOperationEntry extends GeneratorEntry {
       return false;
     } else {
       if (this.declared) callbacks.recordDeclaration(this.declared);
-      for (let i = 0, n = this.args.length; i < n; i++) this.args[i] = callbacks.visitEquivalentValue(this.args[i]);
-      if (this.dependencies)
-        for (let dependency of this.dependencies) callbacks.visitGenerator(dependency, containingGenerator);
+      for (let i = 0, n = this.args.length; i < n; i++) {
+        let originalArg = this.args[i];
+        let visitedArg = callbacks.visitEquivalentValue(originalArg);
+        this.args[i] = visitedArg;
+        if (i === 0) {
+          switch (this.operationDescriptor.type) {
+            case "CALL_BAILOUT":
+              if (originalArg === this.operationDescriptor.data.thisArg)
+                this.operationDescriptor.data.thisArg = visitedArg;
+              break;
+            case "CONDITIONAL_THROW":
+              this.operationDescriptor.data.value = visitedArg;
+              break;
+            default:
+              break;
+          }
+        } else if (i === 1) {
+          switch (this.operationDescriptor.type) {
+            case "EMIT_PROPERTY_ASSIGNMENT":
+            case "LOGICAL_PROPERTY_ASSIGNMENT":
+              this.operationDescriptor.data.value = visitedArg;
+              break;
+            case "CONDITIONAL_PROPERTY_ASSIGNMENT":
+              if (originalArg === this.operationDescriptor.data.value) this.operationDescriptor.data.value = visitedArg;
+              break;
+            case "DEFINE_PROPERTY":
+              invariant(visitedArg instanceof ObjectValue);
+              this.operationDescriptor.data.object = visitedArg;
+              break;
+            default:
+              break;
+          }
+        }
+      }
+      let dependencies = this.getDependencies();
+      if (dependencies !== undefined)
+        for (let dependency of dependencies) callbacks.visitGenerator(dependency, containingGenerator);
       return true;
     }
   }
@@ -359,7 +418,19 @@ export class TemporalOperationEntry extends GeneratorEntry {
   }
 
   getDependencies(): void | Array<Generator> {
-    return this.dependencies;
+    const operationDescriptor = this.operationDescriptor;
+    switch (operationDescriptor.type) {
+      case "DO_WHILE":
+        let generator = operationDescriptor.data.generator;
+        invariant(generator !== undefined);
+        return [generator];
+      case "JOIN_GENERATORS":
+        let generators = operationDescriptor.data.generators;
+        invariant(generators !== undefined);
+        return generators;
+      default:
+        return undefined;
+    }
   }
 }
 
@@ -411,6 +482,16 @@ class ModifiedPropertyEntry extends GeneratorEntry {
   propertyBinding: PropertyBinding;
   newDescriptor: void | Descriptor;
 
+  print(printer: Printer): void {
+    printer.printGeneratorEntry(
+      undefined,
+      "MODIFIED_PROPERTY",
+      [],
+      { descriptor: this.newDescriptor, propertyBinding: this.propertyBinding },
+      { isPure: false, mutatesOnly: undefined }
+    );
+  }
+
   toDisplayString(): string {
     let propertyKey = this.propertyBinding.key;
     let propertyKeyString = propertyKey instanceof Value ? propertyKey.toDisplayString() : propertyKey;
@@ -454,6 +535,16 @@ class ModifiedBindingEntry extends GeneratorEntry {
   containingGenerator: Generator;
   modifiedBinding: Binding;
 
+  print(printer: Printer): void {
+    printer.printGeneratorEntry(
+      undefined,
+      "MODIFIED_BINDING",
+      [],
+      { binding: this.modifiedBinding, value: this.modifiedBinding.value },
+      { isPure: false, mutatesOnly: undefined }
+    );
+  }
+
   toDisplayString(): string {
     return `[ModifiedBinding ${this.modifiedBinding.name}]`;
   }
@@ -485,6 +576,10 @@ class ReturnValueEntry extends GeneratorEntry {
 
   returnValue: Value;
   containingGenerator: Generator;
+
+  print(printer: Printer): void {
+    printer.printGeneratorEntry(undefined, "RETURN", [this.returnValue], {}, { isPure: false, mutatesOnly: undefined });
+  }
 
   toDisplayString(): string {
     return `[Return ${this.returnValue.toDisplayString()}]`;
@@ -518,6 +613,16 @@ class BindingAssignmentEntry extends GeneratorEntry {
   binding: Binding;
   value: Value;
 
+  print(printer: Printer): void {
+    printer.printGeneratorEntry(
+      undefined,
+      "BINDING_ASSIGNMENT",
+      [this.value],
+      { binding: this.binding },
+      { isPure: false, mutatesOnly: undefined }
+    );
+  }
+
   toDisplayString(): string {
     return `[BindingAssignment ${this.binding.name} = ${this.value.toDisplayString()}]`;
   }
@@ -537,7 +642,7 @@ class BindingAssignmentEntry extends GeneratorEntry {
 }
 
 export class Generator {
-  constructor(realm: Realm, name: string, pathConditions: Array<AbstractValue>, effects?: Effects) {
+  constructor(realm: Realm, name: string, pathConditions: PathConditions, effects?: Effects) {
     invariant(realm.useAbstractInterpretation);
     let realmPreludeGenerator = realm.preludeGenerator;
     invariant(realmPreludeGenerator);
@@ -556,7 +661,11 @@ export class Generator {
   effectsToApply: void | Effects;
   id: number;
   _name: string;
-  pathConditions: Array<AbstractValue>;
+  pathConditions: PathConditions;
+
+  print(printer: Printer): void {
+    for (let entry of this._entries) entry.print(printer);
+  }
 
   toDisplayString(): string {
     return Utils.jsonToDisplayString(this, 2);
@@ -580,6 +689,7 @@ export class Generator {
 
     for (let propertyBinding of modifiedProperties.keys()) {
       let object = propertyBinding.object;
+      invariant(object.isValid());
       if (createdObjects.has(object)) continue; // Created Object's binding
       if (ObjectValue.refuseSerializationOnPropertyBinding(propertyBinding)) continue; // modification to internal state
       // modifications to intrinsic objects are tracked in the generator
@@ -629,16 +739,16 @@ export class Generator {
   emitPropertyModification(propertyBinding: PropertyBinding): void {
     invariant(this.effectsToApply !== undefined);
     let desc = propertyBinding.descriptor;
-    if (desc !== undefined) {
+    if (desc !== undefined && desc instanceof PropertyDescriptor) {
       let value = desc.value;
       if (value instanceof AbstractValue) {
         if (value.kind === "conditional") {
           let [c, x, y] = value.args;
           if (c instanceof AbstractValue && c.kind === "template for property name condition") {
-            let ydesc = Object.assign({}, desc, { value: y });
+            let ydesc = new PropertyDescriptor(Object.assign({}, (desc: any), { value: y }));
             let yprop = Object.assign({}, propertyBinding, { descriptor: ydesc });
             this.emitPropertyModification(yprop);
-            let xdesc = Object.assign({}, desc, { value: x });
+            let xdesc = new PropertyDescriptor(Object.assign({}, (desc: any), { value: x }));
             let key = c.args[0];
             invariant(key instanceof AbstractValue);
             let xprop = Object.assign({}, propertyBinding, { key, descriptor: xdesc });
@@ -724,14 +834,14 @@ export class Generator {
     });
   }
 
-  emitDefineProperty(object: ObjectValue, key: string, desc: Descriptor, isDescChanged: boolean = true): void {
+  emitDefineProperty(object: ObjectValue, key: string, desc: PropertyDescriptor, isDescChanged: boolean = true): void {
     if (object.refuseSerialization) return;
     if (desc.enumerable && desc.configurable && desc.writable && desc.value && !isDescChanged) {
       let descValue = desc.value;
       invariant(descValue instanceof Value);
       this.emitPropertyAssignment(object, key, descValue);
     } else {
-      desc = Object.assign({}, desc);
+      desc = new PropertyDescriptor(desc);
       let descValue = desc.value || object.$Realm.intrinsics.undefined;
       invariant(descValue instanceof Value);
       this._addEntry({
@@ -742,7 +852,7 @@ export class Generator {
           desc.get || object.$Realm.intrinsics.undefined,
           desc.set || object.$Realm.intrinsics.undefined,
         ],
-        operationDescriptor: createOperationDescriptor("DEFINE_PROPERTY", { object, desc }),
+        operationDescriptor: createOperationDescriptor("DEFINE_PROPERTY", { object, descriptor: desc }),
       });
     }
   }
@@ -755,10 +865,10 @@ export class Generator {
     });
   }
 
-  emitCall(callTemplate: () => BabelNodeExpression, args: Array<Value>): void {
+  emitCall(callFunctionRef: string, args: Array<Value>): void {
     this._addEntry({
       args,
-      operationDescriptor: createOperationDescriptor("EMIT_CALL", { callTemplate }),
+      operationDescriptor: createOperationDescriptor("EMIT_CALL", { callFunctionRef }),
     });
   }
 
@@ -777,7 +887,6 @@ export class Generator {
     this._addEntry({
       args: [],
       operationDescriptor: createOperationDescriptor("DO_WHILE", { generator: body, value: test }),
-      dependencies: [body],
     });
   }
 
@@ -900,7 +1009,7 @@ export class Generator {
   emitCallAndCaptureResult(
     types: TypesDomain,
     values: ValuesDomain,
-    callTemplate: () => BabelNodeExpression,
+    callFunctionRef: string,
     args: Array<Value>,
     kind?: AbstractValueKind
   ): AbstractValue {
@@ -908,7 +1017,7 @@ export class Generator {
       types,
       values,
       args,
-      createOperationDescriptor("EMIT_CALL_AND_CAPTURE_RESULT", { callTemplate }),
+      createOperationDescriptor("EMIT_CALL_AND_CAPTURE_RESULT", { callFunctionRef }),
       { kind }
     );
   }
@@ -1102,7 +1211,6 @@ export class Generator {
     this._addEntry({
       args: [joinCondition],
       operationDescriptor: createOperationDescriptor("JOIN_GENERATORS", { generators }),
-      dependencies: generators,
     });
   }
 }

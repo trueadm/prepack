@@ -11,7 +11,9 @@
 
 import type { ErrorHandler } from "./errors.js";
 import type { SerializerOptions, RealmOptions, Compatibility, ReactOutputTypes, InvariantModeTypes } from "./options";
-import { Realm } from "./realm.js";
+import { type Realm } from "./realm.js";
+import { type Generator } from "./utils/generator.js";
+import { type FunctionValue } from "./values/index.js";
 import type { DebuggerConfigArguments, DebugReproArguments } from "./types";
 import type { BabelNodeFile } from "@babel/types";
 
@@ -40,7 +42,6 @@ export type PrepackOptions = {|
   reactOutput?: ReactOutputTypes,
   reactVerbose?: boolean,
   reactOptimizeNestedFunctions?: boolean,
-  residual?: boolean,
   serialize?: boolean,
   check?: Array<number>,
   inlineExpressions?: boolean,
@@ -59,6 +60,7 @@ export type PrepackOptions = {|
   debuggerConfigArgs?: DebuggerConfigArguments,
   debugReproArgs?: DebugReproArguments,
   onParse?: BabelNodeFile => void,
+  onExecute?: (Realm, Map<FunctionValue, Generator>) => void,
   arrayNestedOptimizedFunctionsEnabled?: boolean,
 |};
 
@@ -76,8 +78,7 @@ export function getRealmOptions({
   reactOutput,
   reactVerbose,
   reactOptimizeNestedFunctions,
-  residual,
-  serialize = !residual,
+  serialize,
   check,
   strictlyMonotonicDateNow,
   stripFlow,
@@ -102,7 +103,6 @@ export function getRealmOptions({
     reactOutput,
     reactVerbose,
     reactOptimizeNestedFunctions,
-    residual,
     serialize,
     check,
     strictlyMonotonicDateNow,

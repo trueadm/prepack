@@ -41,6 +41,7 @@ import invariant from "../invariant.js";
 import { HeapInspector } from "../utils/HeapInspector.js";
 import { Logger } from "../utils/logger.js";
 import { isReactElement } from "../react/utils.js";
+import { PropertyDescriptor, AbstractJoinedDescriptor } from "../descriptors.js";
 
 type LeakedFunctionInfo = {
   unboundReads: Set<string>,
@@ -137,6 +138,7 @@ function materializeObject(realm: Realm, object: ObjectValue, getCachingHeapInsp
       // If it indeed means deleted binding, should we initialize descriptor with a deleted value?
       if (generator !== undefined) generator.emitPropertyDelete(object, name);
     } else {
+      invariant(descriptor instanceof PropertyDescriptor); // TODO: Deal with joined descriptors.
       let value = descriptor.value;
       invariant(
         value === undefined || value instanceof Value,
@@ -216,11 +218,7 @@ class ObjectValueLeakingVisitor {
     // inject properties with computed names
     if (obj.unknownProperty !== undefined) {
       let desc = obj.unknownProperty.descriptor;
-      if (desc !== undefined) {
-        let val = desc.value;
-        invariant(val instanceof AbstractValue);
-        this.visitObjectPropertiesWithComputedNames(val);
-      }
+      this.visitObjectPropertiesWithComputedNamesDescriptor(desc);
     }
 
     // prototype
@@ -258,6 +256,22 @@ class ObjectValueLeakingVisitor {
     this.visitValue(proto);
   }
 
+  visitObjectPropertiesWithComputedNamesDescriptor(desc: void | Descriptor): void {
+    if (desc !== undefined) {
+      if (desc instanceof PropertyDescriptor) {
+        let val = desc.value;
+        invariant(val instanceof AbstractValue);
+        this.visitObjectPropertiesWithComputedNames(val);
+      } else if (desc instanceof AbstractJoinedDescriptor) {
+        this.visitValue(desc.joinCondition);
+        this.visitObjectPropertiesWithComputedNamesDescriptor(desc.descriptor1);
+        this.visitObjectPropertiesWithComputedNamesDescriptor(desc.descriptor2);
+      } else {
+        invariant(false, "unknown descriptor");
+      }
+    }
+  }
+
   visitObjectPropertiesWithComputedNames(absVal: AbstractValue): void {
     if (absVal.kind === "widened property") return;
     if (absVal.kind === "template for prototype member expression") return;
@@ -289,11 +303,19 @@ class ObjectValueLeakingVisitor {
     }
   }
 
-  visitDescriptor(desc: Descriptor): void {
-    invariant(desc.value === undefined || desc.value instanceof Value);
-    if (desc.value !== undefined) this.visitValue(desc.value);
-    if (desc.get !== undefined) this.visitValue(desc.get);
-    if (desc.set !== undefined) this.visitValue(desc.set);
+  visitDescriptor(desc: void | Descriptor): void {
+    if (desc === undefined) {
+    } else if (desc instanceof PropertyDescriptor) {
+      if (desc.value !== undefined) this.visitValue(desc.value);
+      if (desc.get !== undefined) this.visitValue(desc.get);
+      if (desc.set !== undefined) this.visitValue(desc.set);
+    } else if (desc instanceof AbstractJoinedDescriptor) {
+      this.visitValue(desc.joinCondition);
+      if (desc.descriptor1 !== undefined) this.visitDescriptor(desc.descriptor1);
+      if (desc.descriptor2 !== undefined) this.visitDescriptor(desc.descriptor2);
+    } else {
+      invariant(false, "unknown descriptor");
+    }
   }
 
   visitDeclarativeEnvironmentRecordBinding(
@@ -495,7 +517,7 @@ class ObjectValueLeakingVisitor {
         (val.kind === "widened numeric property" || // TODO: Widened properties needs to be havocable.
           val.kind.startsWith("abstractCounted"));
       invariant(
-        whitelistedKind || val.intrinsicName || val.args.length > 0,
+        whitelistedKind !== undefined || val.intrinsicName !== undefined || val.args.length > 0,
         "Havoced unknown object requires havocable arguments"
       );
 
@@ -586,7 +608,313 @@ export class LeakImplementation {
 }
 
 export class MaterializeImplementation {
-  materialize(realm: Realm, val: ObjectValue) {
+  // TODO: Understand relation to snapshots: #2441
+  materializeObject(realm: Realm, val: ObjectValue): void {
     materializeObject(realm, val);
+  }
+
+  // This routine materializes objects reachable from non-local bindings read
+  // by a function. It does this for the purpose of outlining calls to that function.
+  //
+  // Notes:
+  // - Locations that are only read need not materialize because their values are up-to-date
+  // at optimization time,
+  // - Locations that are written to are ignored, because we make the assumption, for now,
+  // that the function being outlined is pure.
+  // - Previously havoced locations (#2446) should be reloaded, but are currently rejected.
+  // - Specialization depends on the assumption that the Array op will only be used once.
+  // First, we will enforce it: #2448. Later we will relax it: #2454
+  materializeObjectsTransitive(realm: Realm, outlinedFunction: FunctionValue): void {
+    invariant(realm.isInPureScope());
+    let objectsToMaterialize: Set<ObjectValue> = new Set();
+    let visitedValues: Set<Value> = new Set();
+    computeFromValue(outlinedFunction);
+
+    if (objectsToMaterialize.size !== 0 && realm.instantRender.enabled) {
+      let error = new CompilerDiagnostic(
+        "Instant Render does not support array operators that reference objects via non-local bindings",
+        outlinedFunction.expressionLocation,
+        "PP0042",
+        "FatalError"
+      );
+      realm.handleError(error);
+      throw new FatalError();
+    }
+
+    for (let object of objectsToMaterialize) {
+      if (!TestIntegrityLevel(realm, object, "frozen")) materializeObject(realm, object);
+    }
+
+    return;
+    function computeFromBindings(func: FunctionValue, nonLocalReadBindings: Set<string>): void {
+      invariant(func instanceof ECMAScriptSourceFunctionValue);
+      let environment = func.$Environment;
+      while (environment) {
+        let record = environment.environmentRecord;
+        if (record instanceof ObjectEnvironmentRecord) computeFromValue(record.object);
+        else if (record instanceof DeclarativeEnvironmentRecord || record instanceof FunctionEnvironmentRecord)
+          computeFromDeclarativeEnvironmentRecord(record, nonLocalReadBindings);
+        else if (record instanceof GlobalEnvironmentRecord) {
+          // TODO: #2484
+          break;
+        }
+        environment = environment.parent;
+      }
+    }
+    function computeFromDeclarativeEnvironmentRecord(
+      record: DeclarativeEnvironmentRecord,
+      nonLocalReadBindings: Set<string>
+    ): void {
+      let environmentBindings = record.bindings;
+      for (let bindingName of Object.keys(environmentBindings)) {
+        let binding = environmentBindings[bindingName];
+        invariant(binding !== undefined);
+        let found = nonLocalReadBindings.delete(bindingName);
+        // Check what undefined could mean here, besides absent binding
+        // #2446
+        if (found && binding.value !== undefined) {
+          computeFromValue(binding.value);
+        }
+      }
+    }
+    function computeFromAbstractValue(value: AbstractValue): void {
+      if (value.values.isTop()) {
+        for (let arg of value.args) {
+          computeFromValue(arg);
+        }
+      } else {
+        // If we know which object this might be, then leak each of them.
+        for (let element of value.values.getElements()) {
+          computeFromValue(element);
+        }
+      }
+    }
+    function computeFromProxyValue(value: ProxyValue): void {
+      computeFromValue(value.$ProxyTarget);
+      computeFromValue(value.$ProxyHandler);
+    }
+    function computeFromValue(value: Value): void {
+      if (value.isIntrinsic() || value instanceof EmptyValue || value instanceof PrimitiveValue) {
+        visit(value);
+      } else if (value instanceof AbstractValue) {
+        ifNotVisited(value, computeFromAbstractValue);
+      } else if (value instanceof FunctionValue) {
+        ifNotVisited(value, computeFromFunctionValue);
+      } else if (value instanceof ObjectValue) {
+        ifNotVisited(value, computeFromObjectValue);
+      } else if (value instanceof ProxyValue) {
+        ifNotVisited(value, computeFromProxyValue);
+      }
+    }
+    function computeFromObjectValue(value: Value): void {
+      invariant(value instanceof ObjectValue);
+      let kind = value.getKind();
+      computeFromObjectProperties(value, kind);
+
+      switch (kind) {
+        case "RegExp":
+        case "Number":
+        case "String":
+        case "Boolean":
+        case "ReactElement":
+        case "ArrayBuffer":
+        case "Array":
+          break;
+        case "Date":
+          let dateValue = value.$DateValue;
+          invariant(dateValue !== undefined);
+          computeFromValue(dateValue);
+          break;
+        case "Float32Array":
+        case "Float64Array":
+        case "Int8Array":
+        case "Int16Array":
+        case "Int32Array":
+        case "Uint8Array":
+        case "Uint16Array":
+        case "Uint32Array":
+        case "Uint8ClampedArray":
+        case "DataView":
+          let buf = value.$ViewedArrayBuffer;
+          invariant(buf !== undefined);
+          computeFromValue(buf);
+          break;
+        case "Map":
+        case "WeakMap":
+          ifNotVisited(value, computeFromMap);
+          break;
+        case "Set":
+        case "WeakSet":
+          ifNotVisited(value, computeFromSet);
+          break;
+        default:
+          invariant(kind === "Object", `Object of kind ${kind} is not supported in calls to abstract functions.`);
+          invariant(
+            value.$ParameterMap === undefined,
+            `Arguments object is not supported in calls to abstract functions.`
+          );
+          break;
+      }
+      if (!objectsToMaterialize.has(value)) objectsToMaterialize.add(value);
+    }
+    function computeFromDescriptor(descriptor: Descriptor): void {
+      if (descriptor === undefined) {
+      } else if (descriptor instanceof PropertyDescriptor) {
+        if (descriptor.value !== undefined) computeFromValue(descriptor.value);
+        if (descriptor.get !== undefined) computeFromValue(descriptor.get);
+        if (descriptor.set !== undefined) computeFromValue(descriptor.set);
+      } else if (descriptor instanceof AbstractJoinedDescriptor) {
+        computeFromValue(descriptor.joinCondition);
+        if (descriptor.descriptor1 !== undefined) computeFromDescriptor(descriptor.descriptor1);
+        if (descriptor.descriptor2 !== undefined) computeFromDescriptor(descriptor.descriptor2);
+      } else {
+        invariant(false, "unknown descriptor");
+      }
+    }
+    function computeFromObjectPropertyBinding(binding: PropertyBinding): void {
+      let descriptor = binding.descriptor;
+      if (descriptor === undefined) return; //deleted
+      computeFromDescriptor(descriptor);
+    }
+
+    function computeFromObjectProperties(obj: ObjectValue, kind?: ObjectKind): void {
+      // symbol properties
+      for (let [, propertyBindingValue] of obj.symbols) {
+        invariant(propertyBindingValue);
+        computeFromObjectPropertyBinding(propertyBindingValue);
+      }
+
+      // string properties
+      for (let [, propertyBindingValue] of obj.properties) {
+        invariant(propertyBindingValue);
+        computeFromObjectPropertyBinding(propertyBindingValue);
+      }
+
+      // inject properties with computed names
+      if (obj.unknownProperty !== undefined) {
+        let descriptor = obj.unknownProperty.descriptor;
+        computeFromObjectPropertiesWithComputedNamesDescriptor(descriptor);
+      }
+
+      // prototype
+      computeFromObjectPrototype(obj);
+    }
+    function computeFromObjectPrototype(obj: ObjectValue) {
+      computeFromValue(obj.$Prototype);
+    }
+    function computeFromFunctionValue(fn: FunctionValue) {
+      computeFromObjectProperties(fn);
+
+      if (fn instanceof BoundFunctionValue) {
+        computeFromValue(fn.$BoundTargetFunction);
+        computeFromValue(fn.$BoundThis);
+        for (let boundArg of fn.$BoundArguments) computeFromValue(boundArg);
+        return;
+      }
+
+      invariant(
+        !(fn instanceof NativeFunctionValue),
+        "all native function values should have already been created outside this pure function"
+      );
+
+      let nonLocalReadBindings = nonLocalReadBindingsOfFunction(fn);
+      computeFromBindings(fn, nonLocalReadBindings);
+    }
+
+    function computeFromObjectPropertiesWithComputedNamesDescriptor(descriptor: void | Descriptor): void {
+      // TODO: #2484
+      notSupportedForTransitiveMaterialization();
+    }
+
+    function computeFromMap(val: ObjectValue): void {
+      let kind = val.getKind();
+
+      let entries;
+      if (kind === "Map") {
+        entries = val.$MapData;
+      } else {
+        invariant(kind === "WeakMap");
+        entries = val.$WeakMapData;
+      }
+      invariant(entries !== undefined);
+      let len = entries.length;
+
+      for (let i = 0; i < len; i++) {
+        let entry = entries[i];
+        let key = entry.$Key;
+        let value = entry.$Value;
+        if (key === undefined || value === undefined) continue;
+        computeFromValue(key);
+        computeFromValue(value);
+      }
+    }
+
+    function computeFromSet(val: ObjectValue): void {
+      let kind = val.getKind();
+
+      let entries;
+      if (kind === "Set") {
+        entries = val.$SetData;
+      } else {
+        invariant(kind === "WeakSet");
+        entries = val.$WeakSetData;
+      }
+      invariant(entries !== undefined);
+      let len = entries.length;
+
+      for (let i = 0; i < len; i++) {
+        let entry = entries[i];
+        if (entry === undefined) continue;
+
+        computeFromValue(entry);
+      }
+    }
+
+    function nonLocalReadBindingsOfFunction(func: FunctionValue) {
+      // unboundWrites is currently not used, but we leave it in place
+      // to reuse the function closure visitor implemented for leaking
+      let functionInfo = {
+        unboundReads: new Set(),
+        unboundWrites: new Set(),
+      };
+
+      invariant(func instanceof ECMAScriptSourceFunctionValue);
+
+      let formalParameters = func.$FormalParameters;
+      invariant(formalParameters != null);
+
+      let code = func.$ECMAScriptCode;
+      invariant(code != null);
+
+      traverse(
+        t.file(t.program([t.expressionStatement(t.functionExpression(null, formalParameters, code))])),
+        LeakedClosureRefVisitor,
+        null,
+        functionInfo
+      );
+      traverse.cache.clear();
+
+      // TODO #2478: add invariant that there are no write bindings
+      return functionInfo.unboundReads;
+    }
+    function ifNotVisited<T>(value: T, computeFrom: T => void): void {
+      if (!visitedValues.has(value)) {
+        visitedValues.add(value);
+        computeFrom(value);
+      }
+    }
+    function visit(value: Value): void {
+      visitedValues.add(value);
+    }
+    function notSupportedForTransitiveMaterialization() {
+      let error = new CompilerDiagnostic(
+        "Not supported for transitive materialization",
+        outlinedFunction.expressionLocation,
+        "PP0041",
+        "FatalError"
+      );
+      realm.handleError(error);
+      throw new FatalError();
+    }
   }
 }

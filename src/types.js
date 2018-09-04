@@ -29,6 +29,7 @@ import type {
 } from "./values/index.js";
 import { Value } from "./values/index.js";
 import { Completion } from "./completions.js";
+import type { Descriptor as DescriptorClass } from "./descriptors.js";
 import { EnvironmentRecord, LexicalEnvironment, Reference } from "./environment.js";
 import { ObjectValue } from "./values/index.js";
 import type {
@@ -134,26 +135,7 @@ export type DataBlock = Uint8Array;
 
 //
 
-export type Descriptor = {
-  writable?: boolean,
-  enumerable?: boolean,
-  configurable?: boolean,
-
-  // If value instanceof EmptyValue, then this descriptor indicates that the
-  // corresponding property has been deleted.
-  // Only internal properties (those starting with $ / where internalSlot of owning property binding is true) will ever have array values.
-  value?: Value | Array<any>,
-
-  get?: UndefinedValue | CallableObjectValue | AbstractValue,
-  set?: UndefinedValue | CallableObjectValue | AbstractValue,
-
-  // Only used if the result of a join of two descriptors is not a data descriptor with identical attribute values.
-  // When present, any update to the property must produce effects that are the join of updating both desriptors,
-  // using joinCondition as the condition of the join.
-  joinCondition?: AbstractValue,
-  descriptor1?: Descriptor,
-  descriptor2?: Descriptor,
-};
+export type Descriptor = DescriptorClass;
 
 export type FunctionBodyAstNode = {
   // Function body ast node will have uniqueOrderedTag after being interpreted.
@@ -380,12 +362,39 @@ export type PathType = {
   pushInverseAndRefine(condition: Value): void,
 };
 
+export class PathConditions {
+  add(c: AbstractValue): void {}
+
+  implies(e: AbstractValue): boolean {
+    return false;
+  }
+
+  impliesNot(e: AbstractValue): boolean {
+    return false;
+  }
+
+  isEmpty(): boolean {
+    return false;
+  }
+
+  getLength(): number {
+    return 0;
+  }
+
+  getAssumedConditions(): Set<AbstractValue> {
+    return new Set();
+  }
+
+  refineBaseConditons(realm: Realm, depth?: number = 0): void {}
+}
+
 export type LeakType = {
   value(realm: Realm, value: Value, loc: ?BabelNodeSourceLocation): void,
 };
 
 export type MaterializeType = {
-  materialize(realm: Realm, object: ObjectValue): void,
+  materializeObject(realm: Realm, object: ObjectValue): void,
+  materializeObjectsTransitive(realm: Realm, value: FunctionValue): void,
 };
 
 export type PropertiesType = {
@@ -456,9 +465,7 @@ export type PropertiesType = {
   // ECMA262 13.7.5.15
   EnumerateObjectProperties(realm: Realm, O: ObjectValue): ObjectValue,
 
-  ThrowIfMightHaveBeenDeleted(
-    value: void | Value | Array<Value> | Array<{ $Key: void | Value, $Value: void | Value }>
-  ): void,
+  ThrowIfMightHaveBeenDeleted(desc: Descriptor): void,
 
   ThrowIfInternalSlotNotWritable<T: ObjectValue>(realm: Realm, object: T, key: string): T,
 
@@ -723,7 +730,18 @@ export type JoinType = {
 
   joinEffects(joinCondition: Value, e1: Effects, e2: Effects): Effects,
 
-  joinValuesOfSelectedCompletions(selector: (Completion) => boolean, completion: Completion): Value,
+  joinDescriptors(
+    realm: Realm,
+    joinCondition: AbstractValue,
+    d1: void | Descriptor,
+    d2: void | Descriptor
+  ): void | Descriptor,
+
+  joinValuesOfSelectedCompletions(
+    selector: (Completion) => boolean,
+    completion: Completion,
+    keepInfeasiblePaths?: boolean
+  ): Value,
 
   mapAndJoin(
     realm: Realm,
@@ -780,7 +798,7 @@ export type CreateType = {
   CopyDataProperties(realm: Realm, target: ObjectValue, source: Value, excluded: Array<PropertyKeyValue>): ObjectValue,
 
   // ECMA262 7.3.4
-  CreateDataProperty(realm: Realm, O: ObjectValue, P: PropertyKeyValue, V: Value): boolean,
+  CreateDataProperty(realm: Realm, O: ObjectValue | AbstractObjectValue, P: PropertyKeyValue, V: Value): boolean,
 
   // ECMA262 7.3.5
   CreateMethodProperty(realm: Realm, O: ObjectValue, P: PropertyKeyValue, V: Value): boolean,

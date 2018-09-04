@@ -21,6 +21,7 @@ import {
   InvariantModeValues,
 } from "./options.js";
 import { type SerializedResult } from "./serializer/types.js";
+import { TextPrinter } from "./utils/TextPrinter.js";
 import { prepackStdin, prepackFileSync } from "./prepack-node.js";
 import type { BabelNodeSourceLocation } from "@babel/types";
 import fs from "fs";
@@ -62,14 +63,12 @@ function run(
     --initializeMoreModules  Enable speculative initialization of modules (for the module system Prepack has builtin
                              knowledge about). Prepack will try to execute all factory functions it is able to.
     --trace                  Traces the order of module initialization.
-    --serialize              Serializes the partially evaluated global environment as a program that recreates it.
-                             (default = true)
-    --check [start[, count]] Check residual functions for diagnostic messages. Do not serialize or produce residual code.
-    --residual               Produces the residual program that results after constant folding.
+    --check [start[, count]] Check residual functions for diagnostic messages. Do not generate code.
     --profile                Collect statistics about time and memory usage of the different internal passes
     --logStatistics          Log statistics to console
     --statsFile              The name of the output file where statistics will be written to.
     --heapGraphFilePath      The name of the output file where heap graph will be written to.
+    --dumpIRFilePath         The name of the output file where the intermediate representation will be written to.
     --inlineExpressions      When generating code, tells prepack to avoid naming expressions when they are only used once,
                              and instead inline them where they are used.
     --invariantLevel         0: no invariants (default); 1: checks for abstract values; 2: checks for accessed built-ins; 3: internal consistency
@@ -81,6 +80,9 @@ function run(
     --cpuprofile             Create a CPU profile file for the run that can be loaded into the Chrome JavaScript CPU Profile viewer.
     --debugDiagnosticSeverity  FatalError | RecoverableError | Warning | Information (default = FatalError). Diagnostic level at which debugger will stop.
     --debugBuckRoot          Root directory that buck assumes when creating sourcemap paths.
+    --warnAsError            Turns all warnings into errors.
+    --diagnosticAsError      A comma-separated list of non-fatal-error PPxxxx diagnostic codes that should get turned into (recoverable) errors.
+    --noDiagnostic           A comma-separated list of non-fatal-error PPxxxx diagnostic codes that should get suppressed.
   `;
   let args = Array.from(process.argv);
   args.splice(0, 2);
@@ -97,6 +99,7 @@ function run(
   let debugIdentifiers: void | Array<string>;
   let lazyObjectsRuntime: string;
   let heapGraphFilePath: void | string;
+  let dumpIRFilePath: void | string;
   let debugInFilePath: string;
   let debugOutFilePath: string;
   let reactOutput: ReactOutputTypes = "create-element";
@@ -109,6 +112,9 @@ function run(
   // Indicates where to find a zip with prepack runtime. Used in environments where
   // the `yarn pack` strategy doesn't work.
   let externalPrepackPath: void | string;
+  let diagnosticAsError: void | Set<string>;
+  let noDiagnostic: void | Set<string>;
+  let warnAsError: void | true;
   let flags = {
     initializeMoreModules: false,
     trace: false,
@@ -120,13 +126,10 @@ function run(
     delayInitializations: false,
     internalDebug: false,
     debugScopes: false,
-    serialize: false,
-    residual: false,
     profile: false,
     instantRender: false,
     reactEnabled: false,
   };
-
   let reproArguments = [];
   let reproFileNames = [];
   let debuggerConfigArgs: DebuggerConfigArguments = {};
@@ -198,6 +201,20 @@ function run(
           debugIdentifiers = debugIdentifiersString.split(",");
           reproArguments.push("--debugIdentifiers", debugIdentifiersString);
           break;
+        case "diagnosticAsError":
+          let diagnosticAsErrorString = args.shift();
+          diagnosticAsError = new Set(diagnosticAsErrorString.split(","));
+          reproArguments.push("--diagnosticAsError", diagnosticAsErrorString);
+          break;
+        case "noDiagnostic":
+          let noDiagnosticString = args.shift();
+          noDiagnostic = new Set(noDiagnosticString.split(","));
+          reproArguments.push("--noDiagnostic", noDiagnosticString);
+          break;
+        case "warnAsError":
+          warnAsError = true;
+          reproArguments.push("--warnAsError");
+          break;
         case "check":
           let range = args.shift();
           if (range.startsWith("--")) {
@@ -233,6 +250,10 @@ function run(
           break;
         case "heapGraphFilePath":
           heapGraphFilePath = args.shift();
+          // do not include this in reproArguments needed by --repro[OnFatalError/Unconditionally], as path is likely not portable between environments
+          break;
+        case "dumpIRFilePath":
+          dumpIRFilePath = args.shift();
           // do not include this in reproArguments needed by --repro[OnFatalError/Unconditionally], as path is likely not portable between environments
           break;
         case "reactOutput":
@@ -311,10 +332,14 @@ function run(
             "--check [start[, number]]",
             "--lazyObjectsRuntime lazyObjectsRuntimeName",
             "--heapGraphFilePath heapGraphFilePath",
+            "--dumpIRFilePath dumpIRFilePath",
             "--reactOutput " + ReactOutputValues.join(" | "),
             "--repro reprofile.zip",
             "--cpuprofile name.cpuprofile",
             "--invariantMode " + InvariantModeValues.join(" | "),
+            "--warnAsError",
+            "--diagnosticAsError PPxxxx,PPyyyy,...",
+            "--noDiagnostic PPxxxx,PPyyyy,...",
           ];
           for (let flag of Object.keys(flags)) options.push(`--${flag}`);
 
@@ -335,12 +360,6 @@ function run(
     }
   }
 
-  if (!flags.serialize && !flags.residual) flags.serialize = true;
-  if (check) {
-    flags.serialize = false;
-    flags.residual = false;
-  }
-
   let resolvedOptions = Object.assign(
     {},
     {
@@ -353,6 +372,7 @@ function run(
       timeout,
       debugIdentifiers,
       check,
+      serialize: !check,
       lazyObjectsRuntime,
       debugInFilePath,
       debugOutFilePath,
@@ -365,6 +385,16 @@ function run(
     flags
   );
   if (heapGraphFilePath !== undefined) resolvedOptions.heapGraphFormat = "DotLanguage";
+  if (dumpIRFilePath !== undefined) {
+    resolvedOptions.onExecute = (realm, optimizedFunctions) => {
+      let text = "";
+      new TextPrinter(line => {
+        text += line + "\n";
+      }).print(realm, optimizedFunctions);
+      invariant(dumpIRFilePath !== undefined);
+      fs.writeFileSync(dumpIRFilePath, text);
+    };
+  }
   if (lazyObjectsRuntime !== undefined && (resolvedOptions.delayInitializations || resolvedOptions.inlineExpressions)) {
     console.error("lazy objects feature is incompatible with delayInitializations and inlineExpressions options");
     process.exit(1);
@@ -373,6 +403,21 @@ function run(
   let compilerDiagnostics: Map<BabelNodeSourceLocation, CompilerDiagnostic> = new Map();
   let compilerDiagnosticsList: Array<CompilerDiagnostic> = [];
   function errorHandler(compilerDiagnostic: CompilerDiagnostic): ErrorHandlerResult {
+    if (noDiagnostic !== undefined && noDiagnostic.has(compilerDiagnostic.errorCode)) return "Recover";
+    if (
+      (warnAsError && compilerDiagnostic.severity === "Warning") ||
+      (diagnosticAsError !== undefined &&
+        diagnosticAsError.has(compilerDiagnostic.errorCode) &&
+        compilerDiagnostic.severity !== "FatalError")
+    ) {
+      compilerDiagnostic = new CompilerDiagnostic(
+        compilerDiagnostic.message,
+        compilerDiagnostic.location,
+        compilerDiagnostic.errorCode,
+        "RecoverableError",
+        compilerDiagnostic.sourceFilePaths
+      );
+    }
     if (compilerDiagnostic.location) compilerDiagnostics.set(compilerDiagnostic.location, compilerDiagnostic);
     else compilerDiagnosticsList.push(compilerDiagnostic);
     return "Recover";

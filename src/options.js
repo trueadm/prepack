@@ -47,7 +47,6 @@ export type RealmOptions = {
   invariantMode?: InvariantModeTypes,
   emitConcreteModel?: boolean,
   uniqueSuffix?: string,
-  residual?: boolean,
   serialize?: boolean,
   strictlyMonotonicDateNow?: boolean,
   timeout?: number,
@@ -75,10 +74,6 @@ export type SerializerOptions = {
   inlineExpressions?: boolean,
   trace?: boolean,
   heapGraphFormat?: "DotLanguage" | "VISJS",
-};
-
-export type PartialEvaluatorOptions = {
-  sourceMaps?: boolean,
 };
 
 export const defaultOptions = {};

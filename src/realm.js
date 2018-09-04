@@ -10,16 +10,17 @@
 /* @flow */
 
 import type {
+  ArgModel,
   ClassComponentMetadata,
   ConsoleMethodTypes,
+  DebugReproManagerType,
   DebugServerType,
   Descriptor,
+  DisplayResult,
   Intrinsics,
+  PathConditions,
   PropertyBinding,
   ReactHint,
-  DisplayResult,
-  ArgModel,
-  DebugReproManagerType,
 } from "./types.js";
 import { RealmStatistics } from "./statistics.js";
 import {
@@ -33,6 +34,7 @@ import {
   AbstractObjectValue,
   AbstractValue,
   ArrayValue,
+  BoundFunctionValue,
   ConcreteValue,
   ECMAScriptSourceFunctionValue,
   FunctionValue,
@@ -53,7 +55,7 @@ import {
   DeclarativeEnvironmentRecord,
 } from "./environment.js";
 import type { Binding } from "./environment.js";
-import { cloneDescriptor, Construct } from "./methods/index.js";
+import { Construct } from "./methods/index.js";
 import {
   AbruptCompletion,
   Completion,
@@ -68,8 +70,24 @@ import invariant from "./invariant.js";
 import seedrandom from "seedrandom";
 import { createOperationDescriptor, Generator, type TemporalOperationEntry } from "./utils/generator.js";
 import { PreludeGenerator } from "./utils/PreludeGenerator.js";
-import { Environment, Functions, Join, Path, Properties, To, Utils, Widen } from "./singletons.js";
+import {
+  createPathConditions,
+  Environment,
+  Functions,
+  Join,
+  Path,
+  Properties,
+  To,
+  Utils,
+  Widen,
+} from "./singletons.js";
 import type { ReactSymbolTypes } from "./react/utils.js";
+import {
+  cloneDescriptor,
+  AbstractJoinedDescriptor,
+  InternalSlotDescriptor,
+  PropertyDescriptor,
+} from "./descriptors.js";
 import type { BabelNode, BabelNodeSourceLocation, BabelNodeLVal } from "@babel/types";
 export type BindingEntry = { hasLeaked: boolean, value: void | Value };
 export type Bindings = Map<Binding, BindingEntry>;
@@ -218,7 +236,7 @@ export class Realm {
   constructor(opts: RealmOptions, statistics: RealmStatistics) {
     this.statistics = statistics;
     this.isReadOnly = false;
-    this.useAbstractInterpretation = opts.serialize === true || opts.residual === true || Array.isArray(opts.check);
+    this.useAbstractInterpretation = opts.serialize === true || Array.isArray(opts.check);
     this.ignoreLeakLogic = false;
     this.isInPureTryStatement = false;
     if (opts.mathRandomSeed !== undefined) {
@@ -246,7 +264,7 @@ export class Realm {
     this.emitConcreteModel = !!opts.emitConcreteModel;
 
     this.$TemplateMap = [];
-    this.pathConditions = [];
+    this.pathConditions = createPathConditions();
 
     if (this.useAbstractInterpretation) {
       this.preludeGenerator = new PreludeGenerator(opts.debugNames, opts.uniqueSuffix);
@@ -354,9 +372,9 @@ export class Realm {
 
   activeLexicalEnvironments: Set<LexicalEnvironment>;
 
-  // A list of abstract conditions that are known to be true in the current execution path.
+  // A set of abstract conditions that are known to be true in the current execution path.
   // For example, the abstract condition of an if statement is known to be true inside its true branch.
-  pathConditions: Array<AbstractValue>;
+  pathConditions: PathConditions;
 
   currentLocation: ?BabelNodeSourceLocation;
   nextContextLocation: ?BabelNodeSourceLocation;
@@ -379,7 +397,7 @@ export class Realm {
     // we need to know what React component was passed to this AbstractObjectValue so we can visit it next)
     abstractHints: WeakMap<AbstractValue | ObjectValue, ReactHint>,
     activeReconciler: any, // inentionally "any", importing the React reconciler class increases Flow's cylic count
-    classComponentMetadata: Map<ECMAScriptSourceFunctionValue, ClassComponentMetadata>,
+    classComponentMetadata: Map<ECMAScriptSourceFunctionValue | BoundFunctionValue, ClassComponentMetadata>,
     currentOwner?: ObjectValue,
     defaultPropsHelper?: ECMAScriptSourceFunctionValue,
     emptyArray: void | ArrayValue,
@@ -630,7 +648,7 @@ export class Realm {
     invariant(globalObject instanceof ObjectValue);
     let binding = globalObject.properties.get("__checkedBindings");
     invariant(binding !== undefined);
-    let checkedBindingsObject = binding.descriptor && binding.descriptor.value;
+    let checkedBindingsObject = binding.descriptor && binding.descriptor.throwIfNotConcrete(this).value;
     invariant(checkedBindingsObject instanceof ObjectValue);
     return checkedBindingsObject;
   }
@@ -651,7 +669,7 @@ export class Realm {
     let id = `__propertyHasBeenChecked__${objectId}:${P}`;
     let binding = this._getCheckedBindings().properties.get(id);
     if (binding === undefined) return false;
-    let value = binding.descriptor && binding.descriptor.value;
+    let value = binding.descriptor && binding.descriptor.throwIfNotConcrete(this).value;
     return value instanceof Value && !value.mightNotBeTrue();
   }
 
@@ -987,30 +1005,36 @@ export class Realm {
     consequentEffectsFunc: () => Effects,
     alternateEffectsFunc: () => Effects
   ): Value {
-    // Evaluate consequent and alternate in sandboxes and get their effects.
-    let effects1;
-    try {
-      effects1 = Path.withCondition(condValue, consequentEffectsFunc);
-    } catch (e) {
-      if (!(e instanceof InfeasiblePathError)) throw e;
-    }
-
-    let effects2;
-    try {
-      effects2 = Path.withInverseCondition(condValue, alternateEffectsFunc);
-    } catch (e) {
-      if (!(e instanceof InfeasiblePathError)) throw e;
-    }
-
     let effects;
-    if (effects1 === undefined || effects2 === undefined) {
-      if (effects1 === undefined && effects2 === undefined) throw new InfeasiblePathError();
-      effects = effects1 || effects2;
-      invariant(effects !== undefined);
+    if (Path.implies(condValue)) {
+      effects = consequentEffectsFunc();
+    } else if (Path.impliesNot(condValue)) {
+      effects = alternateEffectsFunc();
     } else {
-      // Join the effects, creating an abstract view of what happened, regardless
-      // of the actual value of condValue.
-      effects = Join.joinEffects(condValue, effects1, effects2);
+      // Join effects
+      let effects1;
+      try {
+        effects1 = Path.withCondition(condValue, consequentEffectsFunc);
+      } catch (e) {
+        if (!(e instanceof InfeasiblePathError)) throw e;
+      }
+
+      let effects2;
+      try {
+        effects2 = Path.withInverseCondition(condValue, alternateEffectsFunc);
+      } catch (e) {
+        if (!(e instanceof InfeasiblePathError)) throw e;
+      }
+
+      if (effects1 === undefined || effects2 === undefined) {
+        if (effects1 === undefined && effects2 === undefined) throw new InfeasiblePathError();
+        effects = effects1 || effects2;
+        invariant(effects !== undefined);
+      } else {
+        // Join the effects, creating an abstract view of what happened, regardless
+        // of the actual value of condValue.
+        effects = Join.joinEffects(condValue, effects1, effects2);
+      }
     }
     this.applyEffects(effects);
 
@@ -1063,7 +1087,7 @@ export class Realm {
       if (newlyCreatedObjects.has(key.object) || key.object.refuseSerialization) {
         return;
       }
-      let value = val && val.value;
+      let value = val && val.throwIfNotConcrete(this).value;
       if (value instanceof AbstractValue) {
         invariant(value.operationDescriptor !== undefined);
         let tval = gen.deriveAbstract(
@@ -1085,7 +1109,7 @@ export class Realm {
       let path = key.pathNode;
       let tval = tvalFor.get(key);
       invariant(val !== undefined);
-      let value = val.value;
+      let value = val.throwIfNotConcrete(this).value;
       invariant(value instanceof Value);
       let keyKey = key.key;
       if (typeof keyKey === "string") {
@@ -1126,7 +1150,7 @@ export class Realm {
     if (this.savedCompletion === undefined) {
       if (completion instanceof JoinedNormalAndAbruptCompletions) {
         this.savedCompletion = completion;
-        this.pushPathConditionsLeadingToCompletionOfType(NormalCompletion, completion);
+        this.pushPathConditionsLeadingToNormalCompletions(completion);
         this.captureEffects(completion);
       }
       return completion;
@@ -1134,7 +1158,7 @@ export class Realm {
       let cc = Join.composeCompletions(this.savedCompletion, completion);
       if (cc instanceof JoinedNormalAndAbruptCompletions) {
         this.savedCompletion = cc;
-        this.pushPathConditionsLeadingToCompletionOfType(NormalCompletion, completion);
+        this.pushPathConditionsLeadingToNormalCompletions(completion);
         if (cc.savedEffects === undefined) this.captureEffects(cc);
       } else {
         this.savedCompletion = undefined;
@@ -1143,89 +1167,145 @@ export class Realm {
     }
   }
 
-  pushPathConditionsLeadingToCompletionOfType(CompletionType: typeof Completion, completion: Completion): void {
+  pushPathConditionsLeadingToNormalCompletions(completion: Completion): void {
     let realm = this;
     let bottomValue = realm.intrinsics.__bottomValue;
     // Note that if a completion of type CompletionType has a value is that is bottom, that completion is unreachable
     // and pushing its corresponding path condition would cause an InfeasiblePathError to be thrown.
+    if (completion instanceof JoinedNormalAndAbruptCompletions && completion.composedWith !== undefined)
+      this.pushPathConditionsLeadingToNormalCompletions(completion.composedWith);
     if (completion instanceof JoinedAbruptCompletions || completion instanceof JoinedNormalAndAbruptCompletions) {
-      if (completion.consequent.value === bottomValue || allPathsAreDifferent(completion.consequent)) {
-        if (completion.alternate.value === bottomValue || allPathsAreDifferent(completion.alternate)) return;
+      let jc = completion.joinCondition;
+      if (completion.consequent.value === bottomValue || allPathsAreOfType(AbruptCompletion, completion.consequent)) {
+        if (completion.alternate.value === bottomValue || allPathsAreOfType(AbruptCompletion, completion.alternate))
+          return;
         Path.pushInverseAndRefine(completion.joinCondition);
-        this.pushPathConditionsLeadingToCompletionOfType(CompletionType, completion.alternate);
-      } else if (completion.alternate.value === bottomValue || allPathsAreDifferent(completion.alternate)) {
+        this.pushPathConditionsLeadingToNormalCompletions(completion.alternate);
+      } else if (
+        completion.alternate.value === bottomValue ||
+        allPathsAreOfType(AbruptCompletion, completion.alternate)
+      ) {
         if (completion.consequent.value === bottomValue) return;
         Path.pushAndRefine(completion.joinCondition);
-        this.pushPathConditionsLeadingToCompletionOfType(CompletionType, completion.consequent);
-      } else if (allPathsAreTheSame(completion.consequent)) {
-        if (!allPathsAreTheSame(completion.alternate)) {
-          let alternatePC = getPathConditionForSame(completion.alternate);
-          let disjunct = AbstractValue.createFromLogicalOp(realm, "||", completion.joinCondition, alternatePC);
+        this.pushPathConditionsLeadingToNormalCompletions(completion.consequent);
+      } else if (allPathsAreOfType(NormalCompletion, completion.consequent)) {
+        if (!allPathsAreOfType(NormalCompletion, completion.alternate)) {
+          let alternatePC = getNormalPathConditions(completion.alternate);
+          let disjunct = AbstractValue.createFromLogicalOp(realm, "||", jc, alternatePC, undefined, true, true);
           Path.pushAndRefine(disjunct);
         }
-      } else if (allPathsAreTheSame(completion.alternate)) {
-        let consequentPC = getPathConditionForSame(completion.consequent);
-        let inverse = AbstractValue.createFromUnaryOp(realm, "!", completion.joinCondition);
-        let disjunct = AbstractValue.createFromLogicalOp(realm, "||", inverse, consequentPC);
+      } else if (allPathsAreOfType(NormalCompletion, completion.alternate)) {
+        let consequentPC = getNormalPathConditions(completion.consequent);
+        let inverse = AbstractValue.createFromUnaryOp(realm, "!", jc, true, undefined, true, true);
+        let disjunct = AbstractValue.createFromLogicalOp(realm, "||", inverse, consequentPC, undefined, true, true);
         Path.pushAndRefine(disjunct);
       } else {
-        let jc = completion.joinCondition;
-        let cpc = AbstractValue.createFromLogicalOp(realm, "&&", jc, getPathConditionForSame(completion.consequent));
-        let ijc = AbstractValue.createFromUnaryOp(realm, "!", jc);
-        let apc = AbstractValue.createFromLogicalOp(realm, "&&", ijc, getPathConditionForSame(completion.alternate));
-        let disjunct = AbstractValue.createFromLogicalOp(realm, "||", cpc, apc);
+        let cpc = AbstractValue.createFromLogicalOp(
+          realm,
+          "&&",
+          jc,
+          getNormalPathConditions(completion.consequent),
+          undefined,
+          true,
+          true
+        );
+        let ijc = AbstractValue.createFromUnaryOp(realm, "!", jc, true, undefined, true, true);
+        let apc = AbstractValue.createFromLogicalOp(
+          realm,
+          "&&",
+          ijc,
+          getNormalPathConditions(completion.alternate),
+          undefined,
+          true,
+          true
+        );
+        let disjunct = AbstractValue.createFromLogicalOp(realm, "||", cpc, apc, undefined, true, true);
         Path.pushAndRefine(disjunct);
       }
     }
     return;
 
-    function allPathsAreDifferent(c: Completion): boolean {
-      if (c instanceof JoinedAbruptCompletions || c instanceof JoinedNormalAndAbruptCompletions)
-        return allPathsAreDifferent(c.consequent) && allPathsAreDifferent(c.alternate);
-      if (c instanceof CompletionType) return false;
-      return true;
+    function allPathsAreOfType(CompletionType: typeof Completion, c: Completion): boolean {
+      if (c instanceof JoinedNormalAndAbruptCompletions) {
+        if (c.composedWith !== undefined && !allPathsAreOfType(CompletionType, c.composedWith)) return false;
+        return allPathsAreOfType(CompletionType, c.consequent) && allPathsAreOfType(CompletionType, c.alternate);
+      } else if (c instanceof JoinedAbruptCompletions) {
+        return allPathsAreOfType(CompletionType, c.consequent) && allPathsAreOfType(CompletionType, c.alternate);
+      } else {
+        return c instanceof CompletionType;
+      }
     }
 
-    function allPathsAreTheSame(c: Completion): boolean {
-      if (c instanceof JoinedAbruptCompletions || c instanceof JoinedNormalAndAbruptCompletions)
-        return allPathsAreTheSame(c.consequent) && allPathsAreTheSame(c.alternate);
-      if (c instanceof CompletionType) return true;
-      return false;
-    }
-
-    function getPathConditionForSame(c: Completion): Value {
-      invariant(c instanceof JoinedAbruptCompletions || c instanceof JoinedNormalAndAbruptCompletions);
-      if (c.consequent.value === bottomValue || allPathsAreDifferent(c.consequent)) {
-        invariant(!allPathsAreDifferent(c.alternate));
-        let inverse = AbstractValue.createFromUnaryOp(realm, "!", c.joinCondition);
-        if (allPathsAreTheSame(c.alternate)) return inverse;
-        return AbstractValue.createFromLogicalOp(realm, "&&", inverse, getPathConditionForSame(c.alternate));
-      } else if (c.alternate.value === bottomValue || allPathsAreDifferent(c.alternate)) {
-        invariant(!allPathsAreDifferent(c.consequent));
-        if (allPathsAreTheSame(c.consequent)) return c.joinCondition;
-        return AbstractValue.createFromLogicalOp(realm, "&&", c.joinCondition, getPathConditionForSame(c.consequent));
-      } else if (allPathsAreTheSame(c.consequent)) {
-        // In principle the simplifier shoud reduce the result of the else clause to this case. This does less work.
-        invariant(!allPathsAreTheSame(c.alternate));
-        invariant(!allPathsAreDifferent(c.alternate));
-        let ijc = AbstractValue.createFromUnaryOp(realm, "!", c.joinCondition);
-        let alternatePC = AbstractValue.createFromLogicalOp(realm, "&&", ijc, getPathConditionForSame(c.alternate));
-        return AbstractValue.createFromLogicalOp(realm, "||", c.joinCondition, alternatePC);
-      } else if (allPathsAreTheSame(c.alternate)) {
-        // In principle the simplifier shoud reduce the result of the else clause to this case. This does less work.
-        invariant(!allPathsAreTheSame(c.consequent));
-        invariant(!allPathsAreDifferent(c.consequent));
-        let jc = c.joinCondition;
-        let consequentPC = AbstractValue.createFromLogicalOp(realm, "&&", jc, getPathConditionForSame(c.consequent));
-        let ijc = AbstractValue.createFromUnaryOp(realm, "!", jc);
-        return AbstractValue.createFromLogicalOp(realm, "||", consequentPC, ijc);
+    function getNormalPathConditions(c: Completion): Value {
+      let pathCondToComposeWith;
+      if (c instanceof JoinedNormalAndAbruptCompletions && c.composedWith !== undefined)
+        pathCondToComposeWith = getNormalPathConditions(c.composedWith);
+      if (!(c instanceof JoinedAbruptCompletions || c instanceof JoinedNormalAndAbruptCompletions)) {
+        return c instanceof AbruptCompletion ? realm.intrinsics.false : realm.intrinsics.true;
+      }
+      let pathCond;
+      if (c.consequent.value === bottomValue || allPathsAreOfType(AbruptCompletion, c.consequent)) {
+        if (!allPathsAreOfType(AbruptCompletion, c.alternate)) {
+          let inverse = AbstractValue.createFromUnaryOp(realm, "!", c.joinCondition, true, undefined, true, true);
+          if (allPathsAreOfType(NormalCompletion, c.alternate)) pathCond = inverse;
+          else
+            pathCond = AbstractValue.createFromLogicalOp(
+              realm,
+              "&&",
+              inverse,
+              getNormalPathConditions(c.alternate),
+              undefined,
+              true,
+              true
+            );
+        }
+      } else if (c.alternate.value === bottomValue || allPathsAreOfType(AbruptCompletion, c.alternate)) {
+        if (!allPathsAreOfType(AbruptCompletion, c.consequent)) {
+          if (allPathsAreOfType(NormalCompletion, c.consequent)) {
+            pathCond = c.joinCondition;
+          } else {
+            let jc = c.joinCondition;
+            pathCond = AbstractValue.createFromLogicalOp(
+              realm,
+              "&&",
+              jc,
+              getNormalPathConditions(c.consequent),
+              undefined,
+              true,
+              true
+            );
+          }
+        }
       } else {
         let jc = c.joinCondition;
-        let consequentPC = AbstractValue.createFromLogicalOp(realm, "&&", jc, getPathConditionForSame(c.consequent));
-        let ijc = AbstractValue.createFromUnaryOp(realm, "!", jc);
-        let alternatePC = AbstractValue.createFromLogicalOp(realm, "&&", ijc, getPathConditionForSame(c.alternate));
-        return AbstractValue.createFromLogicalOp(realm, "||", consequentPC, alternatePC);
+        let consequentPC = AbstractValue.createFromLogicalOp(
+          realm,
+          "&&",
+          jc,
+          getNormalPathConditions(c.consequent),
+          undefined,
+          true,
+          true
+        );
+        let ijc = AbstractValue.createFromUnaryOp(realm, "!", jc, true, undefined, true, true);
+        let alternatePC = AbstractValue.createFromLogicalOp(
+          realm,
+          "&&",
+          ijc,
+          getNormalPathConditions(c.alternate),
+          undefined,
+          true,
+          true
+        );
+        pathCond = AbstractValue.createFromLogicalOp(realm, "||", consequentPC, alternatePC, undefined, true, true);
       }
+      if (pathCondToComposeWith === undefined && pathCond === undefined) return realm.intrinsics.false;
+      if (pathCondToComposeWith === undefined) {
+        invariant(pathCond !== undefined);
+        return pathCond;
+      }
+      if (pathCond === undefined) return pathCondToComposeWith;
+      return AbstractValue.createFromLogicalOp(realm, "&&", pathCondToComposeWith, pathCond, undefined, true, true);
     }
   }
 
@@ -1443,7 +1523,20 @@ export class Realm {
     }
     this.callReportPropertyAccess(binding);
     if (this.modifiedProperties !== undefined && !this.modifiedProperties.has(binding)) {
-      this.modifiedProperties.set(binding, cloneDescriptor(binding.descriptor));
+      let clone;
+      let desc = binding.descriptor;
+      if (desc === undefined) {
+        clone = undefined;
+      } else if (desc instanceof AbstractJoinedDescriptor) {
+        clone = new AbstractJoinedDescriptor(desc.joinCondition, desc.descriptor1, desc.descriptor2);
+      } else if (desc instanceof PropertyDescriptor) {
+        clone = cloneDescriptor(desc);
+      } else if (desc instanceof InternalSlotDescriptor) {
+        clone = new InternalSlotDescriptor(desc.value);
+      } else {
+        invariant(false, "unknown descriptor");
+      }
+      this.modifiedProperties.set(binding, clone);
     }
   }
 
@@ -1531,8 +1624,9 @@ export class Realm {
     for (let [key, binding] of template.properties) {
       if (binding === undefined || binding.descriptor === undefined) continue; // deleted
       invariant(binding.descriptor !== undefined);
-      let value = binding.descriptor.value;
-      Properties.ThrowIfMightHaveBeenDeleted(value);
+      let desc = binding.descriptor.throwIfNotConcrete(this);
+      let value = desc.value;
+      Properties.ThrowIfMightHaveBeenDeleted(desc);
       if (value === undefined) {
         AbstractValue.reportIntrospectionError(abstractValue, key);
         throw new FatalError();

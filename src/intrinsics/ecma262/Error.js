@@ -22,8 +22,8 @@ import {
 import { Get } from "../../methods/index.js";
 import { Create, Properties, To } from "../../singletons.js";
 import invariant from "../../invariant.js";
-import buildExpressionTemplate from "../../utils/builder.js";
 import type { BabelNodeSourceLocation } from "@babel/types";
+import { PropertyDescriptor } from "../../descriptors.js";
 
 export default function(realm: Realm): NativeFunctionValue {
   return build("Error", realm, false);
@@ -65,7 +65,7 @@ export function describeLocation(
   if (!locString) {
     if (loc) {
       locString = `${loc.start.line}:${loc.start.column + 1}`;
-      if (loc.source) locString = `${loc.source}:${locString}`;
+      if (loc.source !== null) locString = `${loc.source}:${locString}`;
     } else {
       locString = (loc ? loc.source : undefined) || "unknown";
       if (!displayName) return undefined;
@@ -85,7 +85,6 @@ export function describeLocation(
 }
 
 const buildStackTemplateSrc = 'A + (B ? ": " + B : "") + C';
-const buildStackTemplate = buildExpressionTemplate(buildStackTemplateSrc);
 
 function buildStack(realm: Realm, context: ObjectValue): Value {
   invariant(context.$ErrorData);
@@ -118,13 +117,11 @@ function buildStack(realm: Realm, context: ObjectValue): Value {
 
   return message instanceof StringValue
     ? new StringValue(realm, `${header}${message.value ? `: ${message.value}` : ""}${footer}`)
-    : AbstractValue.createFromTemplate(
-        realm,
-        buildStackTemplate,
-        StringValue,
-        [new StringValue(realm, header), message, new StringValue(realm, footer)],
-        buildStackTemplateSrc
-      );
+    : AbstractValue.createFromTemplate(realm, buildStackTemplateSrc, StringValue, [
+        new StringValue(realm, header),
+        message,
+        new StringValue(realm, footer),
+      ]);
 }
 
 export function build(name: string, realm: Realm, inheritError?: boolean = true): NativeFunctionValue {
@@ -145,12 +142,12 @@ export function build(name: string, realm: Realm, inheritError?: boolean = true)
       let msg = message.getType() === StringValue ? message : To.ToStringValue(realm, message);
 
       // b. Let msgDesc be the PropertyDescriptor{[[Value]]: msg, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true}.
-      let msgDesc = {
+      let msgDesc = new PropertyDescriptor({
         value: msg,
         writable: true,
         enumerable: false,
         configurable: true,
-      };
+      });
 
       // c. Perform ! DefinePropertyOrThrow(O, "message", msgDesc).
       Properties.DefinePropertyOrThrow(realm, O, "message", msgDesc);
@@ -159,12 +156,12 @@ export function build(name: string, realm: Realm, inheritError?: boolean = true)
     }
 
     // Build a text description of the stack.
-    let stackDesc = {
+    let stackDesc = new PropertyDescriptor({
       value: buildStack(realm, O),
       enumerable: false,
       configurable: true,
       writable: true,
-    };
+    });
     Properties.DefinePropertyOrThrow(realm, O, "stack", stackDesc);
 
     // 4. Return O.

@@ -30,7 +30,6 @@ import { FatalError } from "../../errors.js";
 import { Create, Properties, To } from "../../singletons.js";
 import nativeToInterp from "../../utils/native-to-interp.js";
 import invariant from "../../invariant.js";
-import buildExpressionTemplate from "../../utils/builder.js";
 
 type Context = {
   PropertyList?: Array<StringValue>,
@@ -293,9 +292,10 @@ function InternalCloneObject(realm: Realm, val: ObjectValue): ObjectValue {
   let clone = Create.ObjectCreate(realm, realm.intrinsics.ObjectPrototype);
   for (let [key, binding] of val.properties) {
     if (binding === undefined || binding.descriptor === undefined) continue; // deleted
-    invariant(binding.descriptor !== undefined);
-    let value = binding.descriptor.value;
-    Properties.ThrowIfMightHaveBeenDeleted(value);
+    let desc = binding.descriptor;
+    invariant(desc !== undefined);
+    Properties.ThrowIfMightHaveBeenDeleted(desc);
+    let value = desc.throwIfNotConcrete(realm).value;
     if (value === undefined) {
       AbstractValue.reportIntrospectionError(val, key); // cannot handle accessors
       throw new FatalError();
@@ -310,15 +310,13 @@ function InternalCloneObject(realm: Realm, val: ObjectValue): ObjectValue {
 }
 
 const JSONStringifyStr = "global.JSON.stringify(A)";
-const JSONStringify = buildExpressionTemplate(JSONStringifyStr);
 const JSONParseStr = "global.JSON.parse(A)";
-const JSONParse = buildExpressionTemplate(JSONParseStr);
 
 function InternalJSONClone(realm: Realm, val: Value): Value {
   if (val instanceof AbstractValue) {
     if (val instanceof AbstractObjectValue) {
-      let strVal = AbstractValue.createFromTemplate(realm, JSONStringify, StringValue, [val], JSONStringifyStr);
-      let obVal = AbstractValue.createFromTemplate(realm, JSONParse, ObjectValue, [strVal], JSONParseStr);
+      let strVal = AbstractValue.createFromTemplate(realm, JSONStringifyStr, StringValue, [val]);
+      let obVal = AbstractValue.createFromTemplate(realm, JSONParseStr, ObjectValue, [strVal]);
       obVal.values = new ValuesDomain(new Set([InternalCloneObject(realm, val.getTemplate())]));
       return obVal;
     }
@@ -490,7 +488,7 @@ export default function(realm: Realm): ObjectValue {
     if (isAbstract || (value instanceof ObjectValue && value.isPartialObject())) {
       // Return abstract result. This enables cloning via JSON.parse(JSON.stringify(...)).
       let clonedValue = InternalJSONClone(realm, value);
-      let result = AbstractValue.createTemporalFromTemplate(realm, JSONStringify, StringValue, [clonedValue], {
+      let result = AbstractValue.createTemporalFromTemplate(realm, JSONStringifyStr, StringValue, [clonedValue], {
         kind: "JSON.stringify(...)",
       });
       return result;
@@ -539,11 +537,11 @@ export default function(realm: Realm): ObjectValue {
       invariant(parseResult.isPartialObject()); // Because stringify ensures it
       parseResult.makeSimple(); // because the result of JSON.parse is always simple
       // Force evaluation of the parse call
-      unfiltered = AbstractValue.createTemporalFromTemplate(realm, JSONParse, ObjectValue, [text], {
+      unfiltered = AbstractValue.createTemporalFromTemplate(realm, JSONParseStr, ObjectValue, [text], {
         kind: "JSON.parse(...)",
       });
       unfiltered.values = new ValuesDomain(new Set([parseResult]));
-      invariant(unfiltered.intrinsicName);
+      invariant(unfiltered.intrinsicName !== undefined);
       invariant(realm.generator);
       realm.rebuildNestedProperties(unfiltered, unfiltered.intrinsicName);
     } else {
