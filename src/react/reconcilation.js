@@ -136,7 +136,7 @@ function setContextCurrentValue(contextObject: ObjectValue | AbstractObjectValue
 }
 
 function throwUnsupportedSideEffectError(msg: string) {
-  throw new UnsupportedSideEffect(msg);
+  // throw new UnsupportedSideEffect(msg);
 }
 
 export class Reconciler {
@@ -1258,6 +1258,7 @@ export class Reconciler {
         error.message
       }`;
     } else if (error instanceof FatalError) {
+      debugger;
       message = `Failed to optimize React component tree for "${
         evaluatedRootNode.name
       }" due to a fatal error during evaluation: ${error.message}`;

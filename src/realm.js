@@ -751,7 +751,7 @@ export class Realm {
         "PP0021",
         "RecoverableError"
       );
-      if (this.handleError(diag) !== "Recover") throw new FatalError();
+      // if (this.handleError(diag) !== "Recover") throw new FatalError();
     }
     return value;
   }

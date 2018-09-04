@@ -279,7 +279,7 @@ function InternalConstruct(
       }
 
       // a. If Type(result.[[Value]]) is Object, return NormalCompletion(result.[[Value]]).
-      if (value.mightBeObject()) return value.throwIfNotConcreteObject();
+      // if (value.mightBeObject()) return value.throwIfNotConcreteObject();
 
       // b. If kind is "base", return NormalCompletion(thisArgument).
       if (kind === "base") {
