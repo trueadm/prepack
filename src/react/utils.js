@@ -918,7 +918,7 @@ export function getValueFromFunctionCall(
       invariant(newCall);
       value = newCall(args, func);
     } else {
-      value = funcCall(funcThis, args);
+      value = funcCall(funcThis, args, alwaysInline);
     }
     completion = new SimpleNormalCompletion(value);
   } catch (error) {
