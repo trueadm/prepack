@@ -73,6 +73,7 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
     // we don't try and optimize the nested function.
     let pureFuncCall = () =>
       realm.evaluatePure(funcCall, /*bubbles*/ false, () => {
+        debugger;
         throw new NestedOptimizedFunctionSideEffect();
       });
     let effects;
