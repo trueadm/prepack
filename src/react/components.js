@@ -316,6 +316,7 @@ export function evaluateClassConstructor(
   let instanceProperties = new Set();
   let instanceSymbols = new Set();
 
+  let pureScopeEnv = constructorFunc.$Environment;
   realm.evaluatePure(
     () =>
       realm.evaluateForEffects(
@@ -335,6 +336,7 @@ export function evaluateClassConstructor(
         /*state*/ null,
         `react component constructor: ${constructorFunc.getName()}`
       ),
+    pureScopeEnv,
     /*bubbles*/ true,
     /*reportSideEffectFunc*/ null
   );

@@ -68,12 +68,17 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
     }
 
     let funcCall = Utils.createModelledFunctionCall(realm, funcToModel, undefined, thisValue);
+    let pureScopeEnv = funcToModel.$Environment;
     // We take the modelled function and wrap it in a pure evaluation so we can check for
     // side-effects that occur when evaluating the function. If there are side-effects, then
     // we don't try and optimize the nested function.
     let pureFuncCall = () =>
+<<<<<<< HEAD
       realm.evaluatePure(funcCall, /*bubbles*/ false, () => {
         debugger;
+=======
+      realm.evaluatePure(funcCall, pureScopeEnv, /*bubbles*/ false, () => {
+>>>>>>> fix-evaluate-pure
         throw new NestedOptimizedFunctionSideEffect();
       });
     let effects;
