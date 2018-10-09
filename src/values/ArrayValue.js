@@ -73,12 +73,7 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
     // side-effects that occur when evaluating the function. If there are side-effects, then
     // we don't try and optimize the nested function.
     let pureFuncCall = () =>
-<<<<<<< HEAD
-      realm.evaluatePure(funcCall, /*bubbles*/ false, () => {
-        debugger;
-=======
       realm.evaluatePure(funcCall, pureScopeEnv, /*bubbles*/ false, () => {
->>>>>>> fix-evaluate-pure
         throw new NestedOptimizedFunctionSideEffect();
       });
     let effects;
