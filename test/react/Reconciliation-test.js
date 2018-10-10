@@ -52,7 +52,8 @@ it("Key nesting 9", () => {
   runTest(__dirname + "/Reconciliation/key-nesting-9.js", {
     expectedCreateElementCalls:
       /* original 3 reactElements for 6 test cases */ 18 +
-      /* prepacked: one removed by inlining, but we have 6 test cases */ 12,
+      /* prepacked: one removed by inlining, but we have 6 test cases */ 18,
+      // Note: With optional function inlining this goes back up to 3, so 18 in total
   });
 });
 

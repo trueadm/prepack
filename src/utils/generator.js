@@ -700,6 +700,9 @@ export class Generator {
     }
 
     for (let [modifiedBinding] of modifiedBindings.entries()) {
+      if (modifiedBinding.name === "componentRef") {
+        debugger;
+      }
       if (Utils.isBindingMutationOutsideFunction(modifiedBinding, effects, optimizedFunction)) {
         if (!modifiedBinding.hasLeaked) {
           invariant(modifiedBinding.value !== undefined);

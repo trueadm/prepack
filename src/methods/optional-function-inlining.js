@@ -26,7 +26,7 @@ import {
   Value,
 } from "../values/index.js";
 import invariant from "../invariant.js";
-import { Functions, Materialize, Properties } from "../singletons.js";
+import { Functions, Materialize, Properties, Utils } from "../singletons.js";
 import { PropertyDescriptor, cloneDescriptor } from "../descriptors.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { Get } from "../methods/index.js";
@@ -43,36 +43,9 @@ function effectsArePure(realm: Realm, effects: Effects, F: ECMAScriptFunctionVal
       return false;
     }
   }
-  const baseEnv = F.$Environment;
-  const bindingWasMutated = binding => {
-    let env = baseEnv;
-    let bindingName = binding.name;
-    if (bindingName === "arguments") {
-      return false;
-    }
-    if (env instanceof LexicalEnvironment) {
-      while (env !== null) {
-        let envRecord = env.environmentRecord;
-
-        if (envRecord instanceof GlobalEnvironmentRecord) {
-          for (let name of envRecord.$VarNames) {
-            if (name === bindingName) {
-              return true;
-            }
-          }
-        } else if (envRecord instanceof DeclarativeEnvironmentRecord) {
-          if (envRecord.bindings[bindingName] === binding) {
-            return true;
-          }
-        }
-        env = env.parent;
-      }
-    }
-    return false;
-  };
 
   for (let [binding] of effects.modifiedBindings) {
-    if (bindingWasMutated(binding)) {
+    if (Utils.isBindingMutationOutsideFunction(binding, effects, F)) {
       return false;
     }
   }
@@ -193,6 +166,12 @@ function getOptionalInlinableStatus(
         }
       }
       if (val instanceof ArrayValue) {
+        if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+          // Needs inlining as it will likely reference a nested optimized function
+          // and given this array was created inside the function, there's no
+          // real easy way to clone the array and the nested optimized function.
+          return "NEEDS_INLINING";
+        }
         if (val.$Prototype === realm.intrinsics.ArrayPrototype) {
           return "OPTIONALLY_INLINE_WITH_CLONING";
         }
