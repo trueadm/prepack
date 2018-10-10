@@ -389,7 +389,10 @@ export class Realm {
   createdObjects: void | CreatedObjects;
   createdObjectsTrackedForLeaks: void | CreatedObjects;
   createdAbstracts: void | CreatedAbstracts;
+<<<<<<< HEAD
   pureScopeEnv: void | LexicalEnvironment;
+=======
+>>>>>>> master
   reportObjectGetOwnProperties: void | ((ObjectValue | AbstractObjectValue) => void);
   reportSideEffectCallbacks: Set<
     (sideEffectType: SideEffectType, binding: void | Binding | PropertyBinding, expressionLocation: any) => void
@@ -1861,25 +1864,25 @@ export class Realm {
         let loc_end = diagnostic.location.end;
         msg += ` at ${loc_start.line}:${loc_start.column} to ${loc_end.line}:${loc_end.column}`;
       }
-      try {
-        switch (diagnostic.severity) {
-          case "Information":
-            console.log(`Info: ${msg}`);
-            return "Recover";
-          case "Warning":
-            console.warn(`Warn: ${msg}`);
-            return "Recover";
-          case "RecoverableError":
-            console.error(`Error: ${msg}`);
-            return "Fail";
-          case "FatalError":
-            console.error(`Fatal Error: ${msg}`);
-            return "Fail";
-          default:
-            invariant(false, "Unexpected error type");
-        }
-      } finally {
-        console.log(diagnostic.callStack);
+      switch (diagnostic.severity) {
+        case "Information":
+          console.log(`Info: ${msg}`);
+          console.log(diagnostic.callStack);
+          return "Recover";
+        case "Warning":
+          console.warn(`Warn: ${msg}`);
+          console.warn(diagnostic.callStack);
+          return "Recover";
+        case "RecoverableError":
+          console.error(`Error: ${msg}`);
+          console.error(diagnostic.callStack);
+          return "Fail";
+        case "FatalError":
+          console.error(`Fatal Error: ${msg}`);
+          console.error(diagnostic.callStack);
+          return "Fail";
+        default:
+          invariant(false, "Unexpected error type");
       }
     }
     return errorHandler(diagnostic, this.suppressDiagnostics);
