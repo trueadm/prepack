@@ -926,7 +926,7 @@ export class FunctionImplementation {
     argsList: Array<Value>,
     alwaysInline: boolean
   ): Value {
-    if (F instanceof NativeFunctionValue || alwaysInline || realm.optionallyInlineFunctionCalls === "DISABLED") {
+    if (F instanceof NativeFunctionValue || alwaysInline || !realm.optionallyInlineFunctionCalls) {
       return InternalCall(realm, F, thisArgument, argsList, 0);
     }
     return OptionallyInlineInternalCall(realm, F, thisArgument, argsList);

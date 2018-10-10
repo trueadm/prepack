@@ -46,14 +46,14 @@ type LossyConfigProperty =
   | "ARRAY_FUNCTION_PROPERTIES";
 
 function checkLossyConfigPropertyEnabled(realm: Realm, property: LossyConfigProperty): boolean {
-  if (realm.optionallyInlineFunctionCalls === "LOSSY" && realm.optionallyInlineFunctionCallsLossyConfig !== undefined) {
+  if (realm.optionallyInlineFunctionCalls && realm.optionallyInlineFunctionCallsLossyConfig !== undefined) {
     return realm.optionallyInlineFunctionCallsLossyConfig[property] === true;
   }
   return false;
 }
 
 function canAvoidPropertyInliningWithLossyConfig(realm: Realm, obj: ObjectValue, propVal: Value): boolean {
-  invariant(realm.optionallyInlineFunctionCalls === "LOSSY");
+  invariant(realm.optionallyInlineFunctionCalls);
   // If the property matches against the below heuristics and we've got the lossy setting on to ignore them
   // if they come back as NEEDS_INLINING, then we ultimately making the property value abstract
   // during the cloning/remodeling phase.
@@ -136,11 +136,7 @@ function getOptionalInlinableStatus(
             abstractDepth
           );
 
-          if (
-            propStatus === "NEEDS_INLINING" &&
-            (realm.optionallyInlineFunctionCalls !== "LOSSY" ||
-              !canAvoidPropertyInliningWithLossyConfig(realm, val, propVal))
-          ) {
+          if (propStatus === "NEEDS_INLINING" && !canAvoidPropertyInliningWithLossyConfig(realm, val, propVal)) {
             return "NEEDS_INLINING";
           }
         }
@@ -445,7 +441,7 @@ function cloneAndModelObjectValue(
     if (val instanceof BoundFunctionValue) {
       let targetFunction = val.$BoundTargetFunction;
       let clonedTargetFunction = cloneAndModelValue(realm, targetFunction, intrinsicName, funcEffects, rootObject);
-      if (clonedTargetFunction instanceof AbstractValue && realm.optionallyInlineFunctionCalls === "LOSSY") {
+      if (clonedTargetFunction instanceof AbstractValue) {
         return clonedTargetFunction;
       }
       invariant(clonedTargetFunction instanceof ECMAScriptSourceFunctionValue);

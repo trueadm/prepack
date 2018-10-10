@@ -60,7 +60,6 @@ export const ElementSize = {
   Uint8Clamped: 1,
 };
 
-export type OptionallyInlineFunctionCallsType = "DISABLED" | "LOSSLESS" | "LOSSY";
 export type OptionallyInlineFunctionCallsLossyConfig = {
   ARRAY_ABSTRACT_PROPERTIES?: boolean,
   ARRAY_FUNCTION_PROPERTIES?: boolean,

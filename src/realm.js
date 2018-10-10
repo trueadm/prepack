@@ -19,7 +19,6 @@ import type {
   DisplayResult,
   Intrinsics,
   OptionallyInlineFunctionCallsLossyConfig,
-  OptionallyInlineFunctionCallsType,
   PathConditions,
   PropertyBinding,
   ReactHint,
@@ -334,7 +333,7 @@ export class Realm {
       verbose: opts.reactVerbose || false,
     };
 
-    this.optionallyInlineFunctionCalls = opts.optionallyInlineFunctionCalls || "DISABLED";
+    this.optionallyInlineFunctionCalls = opts.optionallyInlineFunctionCalls || false;
     this.optionallyInlineFunctionCallsLossyConfig = opts.optionallyInlineFunctionCallsLossyConfig;
     this.optionallyInlinedDerivedValues = new Map();
     this.optionallyInlinedDerivedPropertyDependencies = new Map();
@@ -384,7 +383,7 @@ export class Realm {
   impliesCounterOverflowed: boolean;
   inSimplificationPath: boolean;
 
-  optionallyInlineFunctionCalls: OptionallyInlineFunctionCallsType;
+  optionallyInlineFunctionCalls: boolean;
   optionallyInlineFunctionCallsLossyConfig: void | OptionallyInlineFunctionCallsLossyConfig;
   optionallyInlinedDerivedValues: Map<Value, Set<Value>>;
   optionallyInlinedDerivedPropertyDependencies: Map<Value, Value>;
