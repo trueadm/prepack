@@ -31,6 +31,7 @@ import { PropertyDescriptor, cloneDescriptor } from "../descriptors.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { Get } from "../methods/index.js";
 import { InternalCall } from "./function.js";
+import { valueIsKnownReactAbstraction } from "../react/utils.js";
 
 function effectsArePure(realm: Realm, effects: Effects, F: ECMAScriptFunctionValue): boolean {
   if (realm.createdObjects === undefined) {
@@ -252,6 +253,11 @@ function getOptionalInlinableStatus(
   } else if (val instanceof AbstractValue) {
     if (!funcEffects.createdAbstracts.has(val)) {
       return "OPTIONALLY_INLINE_WITH_CLONING";
+    }
+    if (valueIsKnownReactAbstraction(realm, val)) {
+      // TODO check if all abstractions are always temporal, if they are not
+      // we can probably clone/optimize the ones that are not
+      return "NEEDS_INLINING";
     }
     if (val.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = val.args;
@@ -557,6 +563,9 @@ function cloneAndModelAbstractValue(
   funcEffects: Effects,
   rootObject: void | ObjectValue
 ): Value {
+  if (valueIsKnownReactAbstraction(realm, val)) {
+    invariant(false, "we should never hit a React known abstract, they should always be inlined as they are temporal");
+  }
   const kind = val.kind;
   if (kind === "conditional") {
     // Conditional ops

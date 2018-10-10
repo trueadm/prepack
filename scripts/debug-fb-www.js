@@ -84,7 +84,7 @@ let prepackOptions = {
   invariantLevel: 0,
   abstractValueImpliesMax: 1000,
   stripFlow: true,
-  optionallyInlineFunctionCalls: "LOSSY",
+  optionallyInlineFunctionCalls: "DISABLED",
   optionallyInlineFunctionCallsLossyConfig: {
     ARRAY_ABSTRACT_PROPERTIES: false,
     ARRAY_FUNCTION_PROPERTIES: false,
