@@ -389,10 +389,7 @@ export class Realm {
   createdObjects: void | CreatedObjects;
   createdObjectsTrackedForLeaks: void | CreatedObjects;
   createdAbstracts: void | CreatedAbstracts;
-<<<<<<< HEAD
   pureScopeEnv: void | LexicalEnvironment;
-=======
->>>>>>> master
   reportObjectGetOwnProperties: void | ((ObjectValue | AbstractObjectValue) => void);
   reportSideEffectCallbacks: Set<
     (sideEffectType: SideEffectType, binding: void | Binding | PropertyBinding, expressionLocation: any) => void
