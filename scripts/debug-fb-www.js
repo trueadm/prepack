@@ -77,7 +77,7 @@ let prepackOptions = {
   reactEnabled: true,
   reactOutput: "jsx",
   reactVerbose: true,
-  reactFailOnUnsupportedSideEffects: false,
+  reactFailOnUnsupportedSideEffects: true,
   reactOptimizeNestedFunctions: true,
   arrayNestedOptimizedFunctionsEnabled: true,
   inlineExpressions: true,
@@ -90,7 +90,7 @@ let prepackOptions = {
     ARRAY_FUNCTION_PROPERTIES: false,
     OBJECT_ABSTRACT_PROPERTIES: false,
     OBJECT_FUNCTION_PROPERTIES: false,
-    COMPLEX_ABSTRACT_CONDITIONS: false,
+    COMPLEX_ABSTRACT_CONDITIONS: true,
   },
 };
 let inputPath = path.resolve("fb-www/input.js");

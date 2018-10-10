@@ -239,14 +239,16 @@ export class Functions {
         let error = new CompilerDiagnostic(msg, location, "PP1007", "Warning");
         realm.handleError(error);
       };
-      let pureScopeEnv = functionValue.$Environment;
-      let effects: Effects = realm.evaluatePure(
-        () => realm.evaluateForEffectsInGlobalEnv(call, undefined, "additional function"),
-        pureScopeEnv,
-        /*bubbles*/ true,
-        (sideEffectType, binding, expressionLocation) =>
-          handleReportedSideEffect(logCompilerDiagnostic, sideEffectType, binding, expressionLocation)
-      );
+      const functionCall = () =>
+        realm.evaluateFunctionForPureEffectsInGlobalEnv(
+          functionValue,
+          call,
+          (sideEffectType, binding, expressionLocation) =>
+            handleReportedSideEffect(logCompilerDiagnostic, sideEffectType, binding, expressionLocation),
+          undefined,
+          "additional function"
+        );
+      let effects: Effects = realm.isInPureScope() ? functionCall() : realm.evaluateWithPureScope(functionCall);
       invariant(effects);
       let additionalFunctionEffects = createAdditionalEffects(
         this.realm,

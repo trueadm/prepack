@@ -9,7 +9,6 @@
 
 /* @flow */
 
-import { DeclarativeEnvironmentRecord, GlobalEnvironmentRecord, LexicalEnvironment } from "../environment.js";
 import type { Realm, Effects } from "../realm.js";
 import type { ECMAScriptFunctionValue } from "../values/index.js";
 import { AbruptCompletion, JoinedNormalAndAbruptCompletions, SimpleNormalCompletion } from "../completions.js";
@@ -32,25 +31,6 @@ import { createOperationDescriptor } from "../utils/generator.js";
 import { Get } from "../methods/index.js";
 import { InternalCall } from "./function.js";
 import { valueIsKnownReactAbstraction } from "../react/utils.js";
-
-function effectsArePure(realm: Realm, effects: Effects, F: ECMAScriptFunctionValue): boolean {
-  if (realm.createdObjects === undefined) {
-    return false;
-  }
-  for (let [binding] of effects.modifiedProperties) {
-    let obj = binding.object;
-    if (!effects.createdObjects.has(obj)) {
-      return false;
-    }
-  }
-
-  for (let [binding] of effects.modifiedBindings) {
-    if (Utils.isBindingMutationOutsideFunction(binding, effects, F)) {
-      return false;
-    }
-  }
-  return true;
-}
 
 type OptionalInlinableStatus =
   | "NEEDS_INLINING"
@@ -339,49 +319,6 @@ function getOptionalInlinableStatus(
     return "OPTIONALLY_INLINE";
   }
   return "NEEDS_INLINING";
-}
-
-function containsFunctionValue(
-  realm: Realm,
-  arg: Value,
-  funcEffects: void | Effects,
-  alreadyVisited?: Set<Value> = new Set()
-): boolean {
-  if (alreadyVisited.has(arg)) {
-    return false;
-  }
-  alreadyVisited.add(arg);
-  if (arg instanceof FunctionValue) {
-    if (funcEffects !== undefined && !funcEffects.createdObjects.has(arg)) {
-      return false;
-    }
-    return true;
-  } else if (arg instanceof AbstractValue) {
-    for (let abstractArg of arg.args) {
-      if (containsFunctionValue(realm, abstractArg, funcEffects, alreadyVisited)) {
-        return true;
-      }
-    }
-  } else if (arg instanceof ObjectValue) {
-    for (let [propName, binding] of arg.properties) {
-      if (binding && binding.descriptor) {
-        let val = Get(realm, arg, propName);
-        if (containsFunctionValue(realm, val, funcEffects, alreadyVisited)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-function argsContainFunctionValues(realm: Realm, argsList: Array<Value>): boolean {
-  for (let arg of argsList) {
-    if (containsFunctionValue(realm, arg)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function cloneObjectProperties(
@@ -738,16 +675,9 @@ export function OptionallyInlineInternalCall(
   // trying to optimize them given they are constant.
   // Furthermore, we do not support "usesThis" just yet, there are some bugs around supporting it
   // that need to get ironed out first. The logic for it remains, as we want to use this in the future.
-  if (!usesThis && !(result instanceof PrimitiveValue) && effectsArePure(realm, effects, F)) {
+  if (!usesThis && !(result instanceof PrimitiveValue) && Utils.areEffectsPure(realm, effects, F)) {
     let generator = effects.generator;
-    // For now, we do not apply this optimization if we pass arguments that contain functions
-    // otherwise we will have to materialize the function bodies, thus potentially undoing the
-    // wins of this optimization.
-    if (
-      generator._entries.length > 0 &&
-      // !argsContainFunctionValues(realm, args) &&
-      !isValueAnAlreadyDefinedObjectIntrinsic(realm, result)
-    ) {
+    if (generator._entries.length > 0 && !isValueAnAlreadyDefinedObjectIntrinsic(realm, result)) {
       let optimizedValue;
       let optimizedEffects;
 

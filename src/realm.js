@@ -99,7 +99,13 @@ export type PropertyBindings = Map<PropertyBinding, void | Descriptor>;
 export type CreatedObjects = Set<ObjectValue>;
 export type CreatedAbstracts = Set<AbstractValue>;
 
-export type SideEffectType = "MODIFIED_BINDING" | "MODIFIED_PROPERTY" | "EXCEPTION_THROWN" | "MODIFIED_GLOBAL";
+export type SideEffectType = "MODIFIED_BINDING" | "MODIFIED_PROPERTY" | "MODIFIED_GLOBAL";
+
+export type SideEffectCallback = (
+  sideEffectType: SideEffectType,
+  binding: void | Binding | PropertyBinding,
+  expressionLocation: any
+) => void;
 
 let effects_uid = 0;
 
@@ -332,7 +338,6 @@ export class Realm {
     this.optionallyInlineFunctionCallsLossyConfig = opts.optionallyInlineFunctionCallsLossyConfig;
     this.optionallyInlinedDerivedValues = new Map();
     this.optionallyInlinedDerivedPropertyDependencies = new Map();
-    this.reportSideEffectCallbacks = new Set();
 
     this.alreadyDescribedLocations = new WeakMap();
     this.stripFlow = opts.stripFlow || false;
@@ -389,11 +394,7 @@ export class Realm {
   createdObjects: void | CreatedObjects;
   createdObjectsTrackedForLeaks: void | CreatedObjects;
   createdAbstracts: void | CreatedAbstracts;
-  pureScopeEnv: void | LexicalEnvironment;
   reportObjectGetOwnProperties: void | ((ObjectValue | AbstractObjectValue) => void);
-  reportSideEffectCallbacks: Set<
-    (sideEffectType: SideEffectType, binding: void | Binding | PropertyBinding, expressionLocation: any) => void
-  >;
   reportPropertyAccess: void | ((PropertyBinding, boolean) => void);
   savedCompletion: void | JoinedNormalAndAbruptCompletions;
 
@@ -716,56 +717,20 @@ export class Realm {
   // that it created itself. This promises that any abstract functions inside of it
   // also won't have effects on any objects or bindings that weren't created in this
   // call.
-  evaluatePure<T>(
-    f: () => T,
-    pureScopeEnv: LexicalEnvironment,
-    bubbleSideEffectReports: boolean,
-    reportSideEffectFunc:
-      | null
-      | ((
-          sideEffectType: SideEffectType,
-          binding: void | Binding | PropertyBinding,
-          location: ?BabelNodeSourceLocation
-        ) => void)
-  ): T {
+  evaluateWithPureScope<T>(f: () => T): T {
+    invariant(
+      this.createdObjectsTrackedForLeaks === undefined,
+      "evaluateWithPureScope cannot have nested evalautePure scopes"
+    );
     let saved_createdObjectsTrackedForLeaks = this.createdObjectsTrackedForLeaks;
-    let saved_reportSideEffectCallbacks;
-    let saved_pureScopeEnv = this.pureScopeEnv;
-    this.pureScopeEnv = pureScopeEnv;
-    // Track all objects (including function closures) created during
-    // this call. This will be used to make the assumption that every
-    // *other* object is unchanged (pure). These objects are marked
-    // as leaked if they're passed to abstract functions.
     this.createdObjectsTrackedForLeaks = new Set();
-    if (reportSideEffectFunc !== null) {
-      if (!bubbleSideEffectReports) {
-        saved_reportSideEffectCallbacks = this.reportSideEffectCallbacks;
-        this.reportSideEffectCallbacks = new Set();
-      }
-      this.reportSideEffectCallbacks.add(reportSideEffectFunc);
-    }
     try {
       return f();
     } finally {
-      this.pureScopeEnv = saved_pureScopeEnv;
       if (saved_createdObjectsTrackedForLeaks === undefined) {
         this.createdObjectsTrackedForLeaks = undefined;
       } else {
-        // Add any created objects from the child evaluatePure's tracked objects set to the
-        // current tracked objects set.
-        if (this.createdObjectsTrackedForLeaks !== undefined) {
-          for (let obj of this.createdObjectsTrackedForLeaks) {
-            saved_createdObjectsTrackedForLeaks.add(obj);
-          }
-        }
         this.createdObjectsTrackedForLeaks = saved_createdObjectsTrackedForLeaks;
-      }
-
-      if (reportSideEffectFunc !== null) {
-        if (!bubbleSideEffectReports && saved_reportSideEffectCallbacks !== undefined) {
-          this.reportSideEffectCallbacks = saved_reportSideEffectCallbacks;
-        }
-        this.reportSideEffectCallbacks.delete(reportSideEffectFunc);
       }
     }
   }
@@ -832,6 +797,18 @@ export class Realm {
     return this.wrapInGlobalEnv(() => this.evaluateForEffects(func, state, generatorName));
   }
 
+  evaluateFunctionForPureEffectsInGlobalEnv(
+    func: FunctionValue,
+    f: () => Value,
+    sideEffectCallback: SideEffectCallback,
+    state?: any,
+    generatorName?: string = "evaluateFunctionForPureEffectsInGlobalEnv"
+  ): Effects {
+    return this.wrapInGlobalEnv(() =>
+      this.evaluateFunctionForPureEffects(func, f, state, generatorName, sideEffectCallback)
+    );
+  }
+
   // NB: does not apply generators because there's no way to cleanly revert them.
   // func should not return undefined
   withEffectsAppliedInGlobalEnv<T>(func: Effects => T, effects: Effects): T {
@@ -890,6 +867,18 @@ export class Realm {
       this.createdObjects = savedCreatedObjects;
       this.savedCompletion = saved_completion;
     }
+  }
+
+  evaluateFunctionForPureEffects(
+    func: FunctionValue,
+    f: () => Completion | Value,
+    state: any,
+    generatorName: string,
+    sideEffectCallback: SideEffectCallback
+  ): Effects {
+    let effects = this.evaluateForEffects(f, state, generatorName);
+    Utils.reportSideEffectsFromEffects(this, effects, func, sideEffectCallback);
+    return effects;
   }
 
   evaluateForEffects(f: () => Completion | Value, state: any, generatorName: string): Effects {
@@ -1524,41 +1513,6 @@ export class Realm {
   // Record the current value of binding in this.modifiedBindings unless
   // there is already an entry for binding.
   recordModifiedBinding(binding: Binding, value?: Value): Binding {
-    const isDefinedInsidePureFn = targetEnv => {
-      let context = this.getRunningContext();
-      let pureScopeEnv = this.pureScopeEnv;
-      let env = context.lexicalEnvironment;
-      while (env !== null) {
-        // If we reach a destroyed env, then it's outside of the pure running context.
-        // Furthermore, if we reach the pure scope env, we're also out of scope.
-        if (env === pureScopeEnv || env.destroyed) {
-          return false;
-        } else if (env.environmentRecord === targetEnv) {
-          return true;
-        }
-        env = env.parent;
-      }
-      return false;
-    };
-
-    if (
-      this.modifiedBindings !== undefined &&
-      !this.modifiedBindings.has(binding) &&
-      value !== undefined &&
-      this.isInPureScope()
-    ) {
-      let env = binding.environment;
-
-      if (
-        !(env instanceof DeclarativeEnvironmentRecord) ||
-        (env instanceof DeclarativeEnvironmentRecord && !isDefinedInsidePureFn(env))
-      ) {
-        for (let callback of this.reportSideEffectCallbacks) {
-          callback("MODIFIED_BINDING", binding, value.expressionLocation);
-        }
-      }
-    }
-
     if (binding.environment.isReadOnly) {
       // This only happens during speculative execution and is reported elsewhere
       throw new FatalError("Trying to modify a binding in read-only realm");
@@ -1589,29 +1543,6 @@ export class Realm {
   // there is already an entry for binding.
   recordModifiedProperty(binding: void | PropertyBinding): void {
     if (binding === undefined) return;
-    if (this.isInPureScope()) {
-      let object = binding.object;
-      invariant(object instanceof ObjectValue);
-      const createdObjectsTrackedForLeaks = this.createdObjectsTrackedForLeaks;
-
-      if (
-        createdObjectsTrackedForLeaks !== undefined &&
-        !createdObjectsTrackedForLeaks.has(object) &&
-        // __markPropertyAsChecked__ is set by realm.markPropertyAsChecked
-        (typeof binding.key !== "string" || !binding.key.includes("__propertyHasBeenChecked__")) &&
-        binding.key !== "_temporalAlias"
-      ) {
-        if (binding.object === this.$GlobalObject) {
-          for (let callback of this.reportSideEffectCallbacks) {
-            callback("MODIFIED_GLOBAL", binding, object.expressionLocation);
-          }
-        } else {
-          for (let callback of this.reportSideEffectCallbacks) {
-            callback("MODIFIED_PROPERTY", binding, object.expressionLocation);
-          }
-        }
-      }
-    }
     if (this.isReadOnly && (this.getRunningContext().isReadOnly || !this.isNewObject(binding.object))) {
       // This only happens during speculative execution and is reported elsewhere
       throw new FatalError("Trying to modify a property in read-only realm");
