@@ -27,16 +27,12 @@ import {
 import invariant from "../invariant.js";
 import { Functions, Materialize, Properties, Utils } from "../singletons.js";
 import { PropertyDescriptor, cloneDescriptor } from "../descriptors.js";
-import { createOperationDescriptor } from "../utils/generator.js";
+import { createOperationDescriptor, Generator } from "../utils/generator.js";
 import { Get } from "../methods/index.js";
 import { InternalCall } from "./function.js";
 import { valueIsKnownReactAbstraction } from "../react/utils.js";
 
-type OptionalInlinableStatus =
-  | "NEEDS_INLINING"
-  | "OPTIONALLY_INLINE_WITH_CLONING"
-  | "OPTIONALLY_INLINE"
-  | "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+type OutliningStatus = "NEEDS_INLINING" | "OUTLINE_WITH_CLONING" | "OUTLINE" | "OUTLINE_DUE_TO_COMPLEXITY";
 
 type LossyConfigProperty =
   | "OBJECT_ABSTRACT_PROPERTIES"
@@ -46,14 +42,14 @@ type LossyConfigProperty =
   | "ARRAY_FUNCTION_PROPERTIES";
 
 function checkLossyConfigPropertyEnabled(realm: Realm, property: LossyConfigProperty): boolean {
-  if (realm.optionallyInlineFunctionCalls && realm.optionallyInlineFunctionCallsLossyConfig !== undefined) {
-    return realm.optionallyInlineFunctionCallsLossyConfig[property] === true;
+  if (realm.functionCallOutliningEnabled && realm.functionCallOutliningLossyConfig !== undefined) {
+    return realm.functionCallOutliningLossyConfig[property] === true;
   }
   return false;
 }
 
 function canAvoidPropertyInliningWithLossyConfig(realm: Realm, obj: ObjectValue, propVal: Value): boolean {
-  invariant(realm.optionallyInlineFunctionCalls);
+  invariant(realm.functionCallOutliningEnabled);
   // If the property matches against the below heuristics and we've got the lossy setting on to ignore them
   // if they come back as NEEDS_INLINING, then we ultimately making the property value abstract
   // during the cloning/remodeling phase.
@@ -87,23 +83,23 @@ function canAvoidPropertyInliningWithLossyConfig(realm: Realm, obj: ObjectValue,
   return false;
 }
 
-function getOptionalInlinableStatus(
+function getOutliningStatus(
   realm: Realm,
   val: Value,
   funcEffects: Effects,
   checkAbstractsAreTemporals: boolean,
   abstractDepth: number
-): OptionalInlinableStatus {
+): OutliningStatus {
   if (val instanceof ConcreteValue) {
     if (val instanceof PrimitiveValue) {
-      return "OPTIONALLY_INLINE_WITH_CLONING";
+      return "OUTLINE_WITH_CLONING";
     } else if (val instanceof ObjectValue) {
       // If the object was created outside of the function we're trying not to inline, then it's
-      // always safe to optimize with this object. Although we return OPTIONALLY_INLINE_WITH_CLONING,
+      // always safe to optimize with this object. Although we return OUTLINE_WITH_CLONING,
       // the logic inside the cloneOrModelValue will always return the same value if it's been created
       // outside of the function we're trying not to inline.
       if (funcEffects !== undefined && !funcEffects.createdObjects.has(val)) {
-        return "OPTIONALLY_INLINE_WITH_CLONING";
+        return "OUTLINE_WITH_CLONING";
       }
       // TODO eventually support temporalAlias, if it's possible
       if (val.temporalAlias !== undefined) {
@@ -128,13 +124,7 @@ function getOptionalInlinableStatus(
           }
           invariant(val instanceof ObjectValue);
           let propVal = Get(realm, val, propName);
-          let propStatus = getOptionalInlinableStatus(
-            realm,
-            propVal,
-            funcEffects,
-            checkAbstractsAreTemporals,
-            abstractDepth
-          );
+          let propStatus = getOutliningStatus(realm, propVal, funcEffects, checkAbstractsAreTemporals, abstractDepth);
 
           if (propStatus === "NEEDS_INLINING" && !canAvoidPropertyInliningWithLossyConfig(realm, val, propVal)) {
             return "NEEDS_INLINING";
@@ -149,7 +139,7 @@ function getOptionalInlinableStatus(
           return "NEEDS_INLINING";
         }
         if (val.$Prototype === realm.intrinsics.ArrayPrototype) {
-          return "OPTIONALLY_INLINE_WITH_CLONING";
+          return "OUTLINE_WITH_CLONING";
         }
         return "NEEDS_INLINING";
       } else if (val instanceof FunctionValue) {
@@ -159,7 +149,7 @@ function getOptionalInlinableStatus(
             // checking if simple functions have unbound reads to bindings already created in the environment.
             return "NEEDS_INLINING";
           } else if (val instanceof BoundFunctionValue) {
-            let thisStatus = getOptionalInlinableStatus(
+            let thisStatus = getOutliningStatus(
               realm,
               val.$BoundThis,
               funcEffects,
@@ -171,7 +161,7 @@ function getOptionalInlinableStatus(
               return "NEEDS_INLINING";
             }
             for (let boundArg of val.$BoundArguments) {
-              let boundArgStatus = getOptionalInlinableStatus(
+              let boundArgStatus = getOutliningStatus(
                 realm,
                 boundArg,
                 funcEffects,
@@ -183,7 +173,7 @@ function getOptionalInlinableStatus(
                 return "NEEDS_INLINING";
               }
             }
-            let targetFunctionStatus = getOptionalInlinableStatus(
+            let targetFunctionStatus = getOutliningStatus(
               realm,
               val.$BoundTargetFunction,
               funcEffects,
@@ -194,20 +184,20 @@ function getOptionalInlinableStatus(
             if (targetFunctionStatus === "NEEDS_INLINING") {
               return "NEEDS_INLINING";
             }
-            return "OPTIONALLY_INLINE_WITH_CLONING";
+            return "OUTLINE_WITH_CLONING";
           }
         }
         return "NEEDS_INLINING";
       } else {
         if (val.$Prototype === realm.intrinsics.ObjectPrototype) {
-          return "OPTIONALLY_INLINE_WITH_CLONING";
+          return "OUTLINE_WITH_CLONING";
         }
         return "NEEDS_INLINING";
       }
     }
   } else if (val instanceof AbstractValue) {
     if (!funcEffects.createdAbstracts.has(val)) {
-      return "OPTIONALLY_INLINE_WITH_CLONING";
+      return "OUTLINE_WITH_CLONING";
     }
     if (valueIsKnownReactAbstraction(realm, val)) {
       // TODO check if all abstractions are always temporal, if they are not
@@ -217,14 +207,14 @@ function getOptionalInlinableStatus(
     if (val.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = val.args;
       invariant(condValue instanceof AbstractValue);
-      let consequentStatus = getOptionalInlinableStatus(
+      let consequentStatus = getOutliningStatus(
         realm,
         consequentVal,
         funcEffects,
         checkAbstractsAreTemporals,
         abstractDepth + 1 // For conditonals always increase depth
       );
-      let alternateStatus = getOptionalInlinableStatus(
+      let alternateStatus = getOutliningStatus(
         realm,
         alternateVal,
         funcEffects,
@@ -232,102 +222,99 @@ function getOptionalInlinableStatus(
         abstractDepth + 1 // For conditonals always increase depth
       );
 
-      if (
-        consequentStatus === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY" ||
-        alternateStatus === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY"
-      ) {
-        return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+      if (consequentStatus === "OUTLINE_DUE_TO_COMPLEXITY" || alternateStatus === "OUTLINE_DUE_TO_COMPLEXITY") {
+        return "OUTLINE_DUE_TO_COMPLEXITY";
       } else if (consequentStatus === "NEEDS_INLINING" || alternateStatus === "NEEDS_INLINING") {
         if (checkLossyConfigPropertyEnabled(realm, "COMPLEX_ABSTRACT_CONDITIONS") && abstractDepth > 5) {
-          return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+          return "OUTLINE_DUE_TO_COMPLEXITY";
         }
         return "NEEDS_INLINING";
-      } else if (consequentStatus === "OPTIONALLY_INLINE" && alternateStatus === "OPTIONALLY_INLINE") {
-        return "OPTIONALLY_INLINE";
+      } else if (consequentStatus === "OUTLINE" && alternateStatus === "OUTLINE") {
+        return "OUTLINE";
       } else {
         if (!checkAbstractsAreTemporals) {
           // We now re-do the check on the same value, this time failing if any of the args are temporal.
           // We do this because on the first pass, we want to allow for cases where all args might
-          // return "OPTIONALLY_INLINE" without the tempral check in place, meaning we can cosider val
-          // as also being "OPTIONALLY_INLINE". Yet, in cases where we don't check for temporals,
-          // we may get back "OPTIONALLY_INLINE_WITH_CLONING" where we'd actually get back "NEED_INLING"
+          // return "OUTLINE" without the tempral check in place, meaning we can cosider val
+          // as also being "OUTLINE". Yet, in cases where we don't check for temporals,
+          // we may get back "OUTLINE_WITH_CLONING" where we'd actually get back "NEED_INLING"
           // in the cases where we find abstracts that were temporal.
-          let status = getOptionalInlinableStatus(realm, val, funcEffects, true, abstractDepth);
-          if (status === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY") {
-            return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+          let status = getOutliningStatus(realm, val, funcEffects, true, abstractDepth);
+          if (status === "OUTLINE_DUE_TO_COMPLEXITY") {
+            return "OUTLINE_DUE_TO_COMPLEXITY";
           } else if (status === "NEEDS_INLINING") {
             return "NEEDS_INLINING";
           }
         } else {
           // We care if the condValue is temporal here, as it means we can't clone the conditional
-          let condStatus = getOptionalInlinableStatus(realm, condValue, funcEffects, true, abstractDepth);
-          if (condStatus === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY") {
-            return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+          let condStatus = getOutliningStatus(realm, condValue, funcEffects, true, abstractDepth);
+          if (condStatus === "OUTLINE_DUE_TO_COMPLEXITY") {
+            return "OUTLINE_DUE_TO_COMPLEXITY";
           } else if (condStatus === "NEEDS_INLINING") {
             return "NEEDS_INLINING";
           }
         }
-        return "OPTIONALLY_INLINE_WITH_CLONING";
+        return "OUTLINE_WITH_CLONING";
       }
     } else if (val.args.length > 0) {
-      let optionalInlinableStatus;
+      let outliningStatus;
       let shouldIncreaseDepth = val.kind === "||" || "&&";
 
       for (let arg of val.args) {
         // We care if the arg is temporal here, as it means we can't clone the abstract
-        let status = getOptionalInlinableStatus(
+        let status = getOutliningStatus(
           realm,
           arg,
           funcEffects,
           checkAbstractsAreTemporals,
           shouldIncreaseDepth ? abstractDepth + 1 : abstractDepth
         );
-        if (status === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY") {
-          return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+        if (status === "OUTLINE_DUE_TO_COMPLEXITY") {
+          return "OUTLINE_DUE_TO_COMPLEXITY";
         } else if (status === "NEEDS_INLINING") {
           if (checkLossyConfigPropertyEnabled(realm, "COMPLEX_ABSTRACT_CONDITIONS") && abstractDepth > 5) {
-            return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+            return "OUTLINE_DUE_TO_COMPLEXITY";
           }
-          optionalInlinableStatus = "NEEDS_INLINING";
-        } else if (status === "OPTIONALLY_INLINE" && optionalInlinableStatus !== "OPTIONALLY_INLINE") {
-          optionalInlinableStatus = "NEEDS_INLINING";
-        } else if (optionalInlinableStatus !== "NEEDS_INLINING") {
-          if (status === "OPTIONALLY_INLINE_WITH_CLONING") {
-            optionalInlinableStatus = "OPTIONALLY_INLINE_WITH_CLONING";
-          } else if (optionalInlinableStatus === undefined) {
-            optionalInlinableStatus = status;
+          outliningStatus = "NEEDS_INLINING";
+        } else if (status === "OUTLINE" && outliningStatus !== "OUTLINE") {
+          outliningStatus = "NEEDS_INLINING";
+        } else if (outliningStatus !== "NEEDS_INLINING") {
+          if (status === "OUTLINE_WITH_CLONING") {
+            outliningStatus = "OUTLINE_WITH_CLONING";
+          } else if (outliningStatus === undefined) {
+            outliningStatus = status;
           }
         }
       }
-      if (!checkAbstractsAreTemporals && optionalInlinableStatus === "OPTIONALLY_INLINE_WITH_CLONING") {
+      if (!checkAbstractsAreTemporals && outliningStatus === "OUTLINE_WITH_CLONING") {
         // We now re-do the check on the same value, this time failing if any of the args are temporal.
         // We do this because on the first pass, we want to allow for cases where all args might
-        // return "OPTIONALLY_INLINE" without the tempral check in place, meaning we can cosider val
-        // as also being "OPTIONALLY_INLINE". Yet, in cases where we don't check for temporals,
-        // we may get back "OPTIONALLY_INLINE_WITH_CLONING" where we'd actually get back "NEED_INLING"
+        // return "OUTLINE" without the tempral check in place, meaning we can cosider val
+        // as also being "OUTLINE". Yet, in cases where we don't check for temporals,
+        // we may get back "OUTLINE_WITH_CLONING" where we'd actually get back "NEED_INLING"
         // in the cases where we find abstracts that were temporal.
-        let status = getOptionalInlinableStatus(realm, val, funcEffects, true, abstractDepth);
-        if (status === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY") {
-          return "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY";
+        let status = getOutliningStatus(realm, val, funcEffects, true, abstractDepth);
+        if (status === "OUTLINE_DUE_TO_COMPLEXITY") {
+          return "OUTLINE_DUE_TO_COMPLEXITY";
         } else if (status === "NEEDS_INLINING") {
           return "NEEDS_INLINING";
         }
       }
-      invariant(optionalInlinableStatus !== undefined);
-      return optionalInlinableStatus;
+      invariant(outliningStatus !== undefined);
+      return outliningStatus;
     }
     if (checkAbstractsAreTemporals && val.isTemporal()) {
       return "NEEDS_INLINING";
     }
     if (val instanceof AbstractObjectValue) {
       if (val.values.isTop() || val.values.isBottom()) {
-        return "OPTIONALLY_INLINE";
+        return "OUTLINE";
       }
       // TODO check values in values and handle those cases
       return "NEEDS_INLINING";
     }
-    // All abstract values with no args are treated as optionally inlinable.
-    return "OPTIONALLY_INLINE";
+    // All abstract values with no args are treated as outlinable.
+    return "OUTLINE";
   }
   return "NEEDS_INLINING";
 }
@@ -382,13 +369,13 @@ function applyPostValueConfig(realm: Realm, value: Value, clonedValue: Value, ro
     }
   }
   if (rootObject !== undefined) {
-    let setOfInlinedObjectProperties = realm.optionallyInlinedDerivedValues.get(rootObject);
+    let setOfOutlineddObjectProperties = realm.functionCallOutliningDerivedValues.get(rootObject);
 
-    if (setOfInlinedObjectProperties === undefined) {
-      setOfInlinedObjectProperties = new Set();
-      realm.optionallyInlinedDerivedValues.set(rootObject, setOfInlinedObjectProperties);
+    if (setOfOutlineddObjectProperties === undefined) {
+      setOfOutlineddObjectProperties = new Set();
+      realm.functionCallOutliningDerivedValues.set(rootObject, setOfOutlineddObjectProperties);
     }
-    setOfInlinedObjectProperties.add(clonedValue);
+    setOfOutlineddObjectProperties.add(clonedValue);
   }
 }
 
@@ -427,7 +414,7 @@ function cloneAndModelObjectPropertyDescriptor(
       !(value instanceof PrimitiveValue) &&
       ((value instanceof ObjectValue && realm.createdObjects.has(value)) || value instanceof AbstractValue)
     ) {
-      realm.optionallyInlinedDerivedPropertyDependencies.set(clonedValue, clonedObject);
+      realm.functionCallOutliningDerivedPropertyDependencies.set(clonedValue, clonedObject);
     }
   } else {
     invariant(false, "// TODO handle get/set in cloneAndModelObjectPropertyDescriptor");
@@ -557,6 +544,7 @@ function cloneAndModelAbstractValue(
     let hasPrefix = val.operationDescriptor.data.prefix;
     return AbstractValue.createFromUnaryOp(realm, kind, clonedCondValue, hasPrefix);
   }
+  invariant(false, "TODO unsupported abstract value type");
 }
 
 function cloneAndModelValue(
@@ -578,8 +566,8 @@ function cloneAndModelValue(
     if (!funcEffects.createdAbstracts.has(val)) {
       return val;
     }
-    let status = getOptionalInlinableStatus(realm, val, funcEffects, true, 0);
-    if (status === "OPTIONALLY_INLINE_WITH_CLONING") {
+    let status = getOutliningStatus(realm, val, funcEffects, true, 0);
+    if (status === "OUTLINE_WITH_CLONING") {
       return cloneAndModelAbstractValue(realm, val, intrinsicName, funcEffects, rootObject);
     } else {
       invariant(intrinsicName !== null);
@@ -685,7 +673,14 @@ function isValueAnAlreadyDefinedObjectIntrinsic(realm: Realm, val: Value) {
   return val instanceof ObjectValue && val.isIntrinsic() && !realm.createdObjects.has(val);
 }
 
-export function OptionallyInlineInternalCall(
+function generatorSizeShouldBeOutlined(generator: Generator): boolean {
+  // A heuristic of having a generator at least 3 entries or higher before it can be inlined
+  // was a generally good number through testing on product code. Too small and the outlining
+  // becomes redundant due to code size.
+  return generator._entries.length > 2;
+}
+
+export function PossiblyOutlineInternalCall(
   realm: Realm,
   F: ECMAScriptFunctionValue,
   thisArgument: Value,
@@ -708,32 +703,30 @@ export function OptionallyInlineInternalCall(
   }
   invariant(result instanceof Value);
   let usesThis = thisArgument !== realm.intrinsics.undefined;
-  let args = usesThis ? [thisArgument, ...argsList] : argsList;
   // We always inline primitive values that are returned. There's no apparant benefit from
   // trying to optimize them given they are constant.
   // Furthermore, we do not support "usesThis". Outling functions that use "this" requires
   // us to materialize the "this" object and thus this creates vastly more code bloat than
   // without this optimization in place (around 50% more in real product code testing).
   if (!usesThis && !(result instanceof PrimitiveValue) && Utils.areEffectsPure(realm, effects, F)) {
-    let generator = effects.generator;
-    if (generator._entries.length > 0 && !isValueAnAlreadyDefinedObjectIntrinsic(realm, result)) {
+    if (generatorSizeShouldBeOutlined(effects.generator) && !isValueAnAlreadyDefinedObjectIntrinsic(realm, result)) {
       let optimizedValue;
       let optimizedEffects;
 
       realm.withEffectsAppliedInGlobalEnv(() => {
         invariant(result instanceof Value);
-        let status = getOptionalInlinableStatus(realm, result, effects, false, 0);
-        if (status === "OPTIONALLY_INLINE" || status === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY") {
-          [optimizedValue, optimizedEffects] = createAbstractTemporalValue(realm, result, [F, ...args]);
-        } else if (status === "OPTIONALLY_INLINE_WITH_CLONING") {
-          [optimizedValue, optimizedEffects] = createDeepClonedTemporalValue(realm, result, [F, ...args], effects);
+        let status = getOutliningStatus(realm, result, effects, false, 0);
+        if (status === "OUTLINE" || status === "OUTLINE_DUE_TO_COMPLEXITY") {
+          [optimizedValue, optimizedEffects] = createAbstractTemporalValue(realm, result, [F, ...argsList]);
+        } else if (status === "OUTLINE_WITH_CLONING") {
+          [optimizedValue, optimizedEffects] = createDeepClonedTemporalValue(realm, result, [F, ...argsList], effects);
         }
         return realm.intrinsics.undefined;
       }, effects);
 
       if (optimizedValue !== undefined && optimizedEffects !== undefined) {
         // We need to materialize any objects we pass as arguments as objects
-        for (let arg of args) {
+        for (let arg of argsList) {
           if (arg instanceof ObjectValue) {
             Materialize.materializeObject(realm, arg);
           }

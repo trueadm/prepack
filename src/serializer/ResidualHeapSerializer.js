@@ -2298,8 +2298,8 @@ export class ResidualHeapSerializer {
           let temporalAlias = value.temporalAlias;
           return !this.referencedDeclaredValues.has(temporalAlias) && !this.residualValues.has(temporalAlias);
         }
-        if (value.isIntrinsic() && this.realm.optionallyInlinedDerivedValues.has(value)) {
-          let setOfInlinedObjectProperties = this.realm.optionallyInlinedDerivedValues.get(value);
+        if (value.isIntrinsic() && this.realm.functionCallOutliningDerivedValues.has(value)) {
+          let setOfInlinedObjectProperties = this.realm.functionCallOutliningDerivedValues.get(value);
 
           if (setOfInlinedObjectProperties !== undefined) {
             for (let propVal of setOfInlinedObjectProperties) {

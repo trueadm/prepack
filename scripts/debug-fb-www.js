@@ -84,13 +84,13 @@ let prepackOptions = {
   invariantLevel: 0,
   abstractValueImpliesMax: 1000,
   stripFlow: true,
-  optionallyInlineFunctionCalls: true,
-  optionallyInlineFunctionCallsLossyConfig: {
-    ARRAY_ABSTRACT_PROPERTIES: false,
+  functionCallOutliningEnabled: true,
+  functionCallOutliningLossyConfig: {
+    ARRAY_ABSTRACT_PROPERTIES: true,
     ARRAY_FUNCTION_PROPERTIES: false,
-    OBJECT_ABSTRACT_PROPERTIES: false,
+    OBJECT_ABSTRACT_PROPERTIES: true,
     OBJECT_FUNCTION_PROPERTIES: false,
-    COMPLEX_ABSTRACT_CONDITIONS: false,
+    COMPLEX_ABSTRACT_CONDITIONS: true,
   },
 };
 let inputPath = path.resolve("fb-www/input.js");

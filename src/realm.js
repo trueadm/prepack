@@ -18,7 +18,7 @@ import type {
   Descriptor,
   DisplayResult,
   Intrinsics,
-  OptionallyInlineFunctionCallsLossyConfig,
+  FunctionCallOutliningLossyConfig,
   PathConditions,
   PropertyBinding,
   ReactHint,
@@ -333,10 +333,10 @@ export class Realm {
       verbose: opts.reactVerbose || false,
     };
 
-    this.optionallyInlineFunctionCalls = opts.optionallyInlineFunctionCalls || false;
-    this.optionallyInlineFunctionCallsLossyConfig = opts.optionallyInlineFunctionCallsLossyConfig;
-    this.optionallyInlinedDerivedValues = new Map();
-    this.optionallyInlinedDerivedPropertyDependencies = new Map();
+    this.functionCallOutliningEnabled = opts.functionCallOutliningEnabled || false;
+    this.functionCallOutliningLossyConfig = opts.functionCallOutliningLossyConfig;
+    this.functionCallOutliningDerivedValues = new Map();
+    this.functionCallOutliningDerivedPropertyDependencies = new Map();
 
     this.alreadyDescribedLocations = new WeakMap();
     this.stripFlow = opts.stripFlow || false;
@@ -383,10 +383,10 @@ export class Realm {
   impliesCounterOverflowed: boolean;
   inSimplificationPath: boolean;
 
-  optionallyInlineFunctionCalls: boolean;
-  optionallyInlineFunctionCallsLossyConfig: void | OptionallyInlineFunctionCallsLossyConfig;
-  optionallyInlinedDerivedValues: Map<Value, Set<Value>>;
-  optionallyInlinedDerivedPropertyDependencies: Map<Value, Value>;
+  functionCallOutliningEnabled: boolean;
+  functionCallOutliningLossyConfig: void | FunctionCallOutliningLossyConfig;
+  functionCallOutliningDerivedValues: Map<Value, Set<Value>>;
+  functionCallOutliningDerivedPropertyDependencies: Map<Value, Value>;
 
   modifiedBindings: void | Bindings;
   modifiedProperties: void | PropertyBindings;

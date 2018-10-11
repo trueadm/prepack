@@ -60,7 +60,7 @@ export const ElementSize = {
   Uint8Clamped: 1,
 };
 
-export type OptionallyInlineFunctionCallsLossyConfig = {
+export type FunctionCallOutliningLossyConfig = {
   ARRAY_ABSTRACT_PROPERTIES?: boolean,
   ARRAY_FUNCTION_PROPERTIES?: boolean,
   OBJECT_ABSTRACT_PROPERTIES?: boolean,

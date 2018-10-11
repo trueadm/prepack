@@ -319,8 +319,8 @@ export class Emitter {
     }
 
     let realm = val.$Realm;
-    if (realm.optionallyInlinedDerivedPropertyDependencies.has(val)) {
-      let dependency = realm.optionallyInlinedDerivedPropertyDependencies.get(val);
+    if (realm.functionCallOutliningDerivedPropertyDependencies.has(val)) {
+      let dependency = realm.functionCallOutliningDerivedPropertyDependencies.get(val);
       invariant(dependency !== undefined);
       result = recurse(dependency);
       if (result !== undefined) return result;

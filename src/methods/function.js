@@ -69,7 +69,7 @@ import type {
 } from "@babel/types";
 import * as t from "@babel/types";
 import { PropertyDescriptor } from "../descriptors.js";
-import { OptionallyInlineInternalCall } from "./optional-function-inlining.js";
+import { PossiblyOutlineInternalCall } from "./optional-function-inlining.js";
 
 export function InternalCall(
   realm: Realm,
@@ -926,10 +926,10 @@ export class FunctionImplementation {
     argsList: Array<Value>,
     alwaysInline: boolean
   ): Value {
-    if (F instanceof NativeFunctionValue || alwaysInline || !realm.optionallyInlineFunctionCalls) {
+    if (F instanceof NativeFunctionValue || alwaysInline || !realm.functionCallOutliningEnabled) {
       return InternalCall(realm, F, thisArgument, argsList, 0);
     }
-    return OptionallyInlineInternalCall(realm, F, thisArgument, argsList);
+    return PossiblyOutlineInternalCall(realm, F, thisArgument, argsList);
   }
 
   // ECMA262 9.2.2
