@@ -750,6 +750,7 @@ export function PossiblyOutlineInternalCall(
   thisArgument: Value,
   argsList: Array<Value>
 ): Value {
+  let savedOptimizedFunctions = new Set(realm.optimizedFunctions);
   let effects = realm.evaluateForEffects(
     () => InternalCall(realm, F, thisArgument, argsList, 0),
     null,
@@ -767,12 +768,18 @@ export function PossiblyOutlineInternalCall(
   }
   invariant(result instanceof Value);
   let usesThis = thisArgument !== realm.intrinsics.undefined;
+  let functionContainedOptimizeCalls = realm.optimizedFunctions.size !== savedOptimizedFunctions.size;
   // We always inline primitive values that are returned. There's no apparant benefit from
   // trying to optimize them given they are constant.
   // Furthermore, we do not support "usesThis". Outling functions that use "this" requires
   // us to materialize the "this" object and thus this creates vastly more code bloat than
   // without this optimization in place (around 50% more in real product code testing).
-  if (!usesThis && !(result instanceof PrimitiveValue) && Utils.areEffectsPure(realm, effects, F)) {
+  if (
+    !functionContainedOptimizeCalls &&
+    !usesThis &&
+    !(result instanceof PrimitiveValue) &&
+    Utils.areEffectsPure(realm, effects, F)
+  ) {
     if (generatorSizeShouldBeOutlined(effects.generator) && !isValueAnAlreadyDefinedObjectIntrinsic(realm, result)) {
       let optimizedValue;
       let optimizedEffects;
