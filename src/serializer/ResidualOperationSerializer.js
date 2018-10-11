@@ -943,17 +943,10 @@ export class ResidualOperationSerializer {
   }
 
   _serializeCallOptionalInline(
-    { usesThis }: OperationDescriptorData,
+    {  }: OperationDescriptorData,
     [callFunc, ...funArgs]: Array<BabelNodeExpression>
   ): BabelNodeExpression {
-    if (usesThis) {
-      return t.callExpression(
-        t.memberExpression(callFunc, t.identifier("call")),
-        ((funArgs: any): Array<BabelNodeExpression | BabelNodeSpreadElement>)
-      );
-    } else {
-      return t.callExpression(callFunc, ((funArgs: any): Array<BabelNodeExpression | BabelNodeSpreadElement>));
-    }
+    return t.callExpression(callFunc, ((funArgs: any): Array<BabelNodeExpression | BabelNodeSpreadElement>));
   }
 
   _serializeCallBailout(

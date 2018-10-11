@@ -423,6 +423,7 @@ function cloneAndModelObjectPropertyDescriptor(
     clonedDesc.value = clonedValue;
     invariant(realm.createdObjects !== undefined);
     if (
+      value !== clonedValue &&
       !(value instanceof PrimitiveValue) &&
       ((value instanceof ObjectValue && realm.createdObjects.has(value)) || value instanceof AbstractValue)
     ) {
@@ -597,8 +598,7 @@ function createTemporalModeledValue(
   intrinsicName: void | string,
   temporalArgs: void | Array<Value>,
   rootObject: void | ObjectValue,
-  funcEffects: Effects,
-  usesThis: boolean
+  funcEffects: Effects
 ): Value {
   invariant(temporalArgs !== undefined);
   invariant(realm.generator !== undefined);
@@ -611,7 +611,7 @@ function createTemporalModeledValue(
         return obj;
       },
       temporalArgs,
-      createOperationDescriptor("CALL_OPTIONAL_INLINE", { usesThis }),
+      createOperationDescriptor("CALL_OPTIONAL_INLINE"),
       // TODO: isPure isn't strictly correct here, as the function
       // might contain abstract function calls that we need to happen
       // and won't happen if the temporal is never referenced (thus DCE).
@@ -626,7 +626,7 @@ function createTemporalModeledValue(
         return absVal;
       },
       temporalArgs,
-      createOperationDescriptor("CALL_OPTIONAL_INLINE", { usesThis }),
+      createOperationDescriptor("CALL_OPTIONAL_INLINE"),
       // TODO: isPure isn't strictly correct here, as the function
       // might contain abstract function calls that we need to happen
       // and won't happen if the temporal is never referenced (thus DCE).
@@ -640,13 +640,12 @@ function createDeepClonedTemporalValue(
   realm: Realm,
   val: Value,
   temporalArgs: Array<Value>,
-  funcEffects: Effects,
-  usesThis: boolean
+  funcEffects: Effects
 ): [Value, Effects] {
   let clonedObject;
   let effects = realm.evaluateForEffects(
     () => {
-      clonedObject = createTemporalModeledValue(realm, val, undefined, temporalArgs, undefined, funcEffects, usesThis);
+      clonedObject = createTemporalModeledValue(realm, val, undefined, temporalArgs, undefined, funcEffects);
       return realm.intrinsics.undefined;
     },
     undefined,
@@ -656,12 +655,7 @@ function createDeepClonedTemporalValue(
   return [clonedObject, effects];
 }
 
-function createAbstractTemporalValue(
-  realm: Realm,
-  val: Value,
-  temporalArgs: Array<Value>,
-  usesThis: boolean
-): [Value, Effects] {
+function createAbstractTemporalValue(realm: Realm, val: Value, temporalArgs: Array<Value>): [Value, Effects] {
   let abstractVal;
   let effects = realm.evaluateForEffects(
     () => {
@@ -669,7 +663,7 @@ function createAbstractTemporalValue(
         realm,
         val.getType(),
         temporalArgs,
-        createOperationDescriptor("CALL_OPTIONAL_INLINE", { usesThis }),
+        createOperationDescriptor("CALL_OPTIONAL_INLINE"),
         // TODO: isPure isn't strictly correct here, as the function
         // might contain abstract function calls that we need to happen
         // and won't happen if the temporal is never referenced (thus DCE).
@@ -717,9 +711,10 @@ export function OptionallyInlineInternalCall(
   let args = usesThis ? [thisArgument, ...argsList] : argsList;
   // We always inline primitive values that are returned. There's no apparant benefit from
   // trying to optimize them given they are constant.
-  // Furthermore, we do not support "usesThis" just yet, there are some bugs around supporting it
-  // that need to get ironed out first. The logic for it remains, as we want to use this in the future.
-  if (!(result instanceof PrimitiveValue) && Utils.areEffectsPure(realm, effects, F)) {
+  // Furthermore, we do not support "usesThis". Outling functions that use "this" requires
+  // us to materialize the "this" object and thus this creates vastly more code bloat than
+  // without this optimization in place (around 50% more in real product code testing).
+  if (!usesThis && !(result instanceof PrimitiveValue) && Utils.areEffectsPure(realm, effects, F)) {
     let generator = effects.generator;
     if (generator._entries.length > 0 && !isValueAnAlreadyDefinedObjectIntrinsic(realm, result)) {
       let optimizedValue;
@@ -729,15 +724,9 @@ export function OptionallyInlineInternalCall(
         invariant(result instanceof Value);
         let status = getOptionalInlinableStatus(realm, result, effects, false, 0);
         if (status === "OPTIONALLY_INLINE" || status === "OPTIONALLY_INLINE_DUE_TO_COMPLEXITY") {
-          [optimizedValue, optimizedEffects] = createAbstractTemporalValue(realm, result, [F, ...args], usesThis);
+          [optimizedValue, optimizedEffects] = createAbstractTemporalValue(realm, result, [F, ...args]);
         } else if (status === "OPTIONALLY_INLINE_WITH_CLONING") {
-          [optimizedValue, optimizedEffects] = createDeepClonedTemporalValue(
-            realm,
-            result,
-            [F, ...args],
-            effects,
-            usesThis
-          );
+          [optimizedValue, optimizedEffects] = createDeepClonedTemporalValue(realm, result, [F, ...args], effects);
         }
         return realm.intrinsics.undefined;
       }, effects);
