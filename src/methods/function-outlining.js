@@ -211,6 +211,7 @@ function getOutliningStatusFromConcreteValue(
       return "NEEDS_INLINING";
     }
   }
+  invariant(false, "unknown concrete value type");
 }
 
 function getOutliningStatusFromAbstractValue(
@@ -604,9 +605,12 @@ function cloneAndModelAbstractValue(
   } else if (kind === "abstractConcreteUnion") {
     let [abstractPropertyValue, ...concreteValues] = val.args;
     let clonedAbstractPropertyValue = cloneAndModelValue(realm, abstractPropertyValue, null, funcEffects, rootObject);
-    let clonedConcreteValues = concreteValues.map(concreteValue =>
-      cloneAndModelValue(realm, concreteValue, null, funcEffects, rootObject)
-    );
+    let clonedConcreteValues = concreteValues.map(concreteValue => {
+      let clonedConcreteValue = cloneAndModelValue(realm, concreteValue, null, funcEffects, rootObject);
+      invariant(clonedConcreteValue instanceof ConcreteValue);
+      return clonedConcreteValue;
+    });
+    invariant(clonedAbstractPropertyValue instanceof AbstractValue);
     return AbstractValue.createAbstractConcreteUnion(realm, clonedAbstractPropertyValue, clonedConcreteValues);
   } else if (kind !== undefined && kind.startsWith("property:")) {
     let clonedArgs = val.args.map(arg => cloneAndModelValue(realm, arg, null, funcEffects, rootObject));
@@ -682,7 +686,6 @@ function createTemporalModeledValue(
     // and won't happen if the temporal is never referenced (thus DCE).
     { isPure: true }
   );
-  invariant(false, "TODO support more types of abstract value");
 }
 
 function createDeepClonedTemporalValue(
