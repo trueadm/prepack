@@ -1051,6 +1051,8 @@ export default class AbstractValue extends Value {
     result.kind = AbstractValue.makeKind("abstractCounted", (realm.objectCount++).toString()); // need not be an object, but must be unique
     result.expressionLocation = location;
     result.shape = shape;
+    // This ensures that outlining doesn't think this value is something that can be cloned
+    result.isTemporal = () => true;
     return result;
   }
 

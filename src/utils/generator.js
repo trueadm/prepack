@@ -1076,25 +1076,6 @@ export class Generator {
     return value;
   }
 
-  deriveAbstractFromBuildFunction(
-    buildValue: (intrinsicName: string) => AbstractValue,
-    args: Array<Value>,
-    operationDescriptor: OperationDescriptor,
-    optionalArgs?: {| isPure?: boolean |}
-  ): AbstractValue {
-    let id = this.preludeGenerator.nameGenerator.generate("derived");
-    let value = buildValue(id);
-    invariant(value instanceof AbstractValue);
-    invariant(value.intrinsicName === id);
-    this._addDerivedEntry({
-      isPure: optionalArgs ? optionalArgs.isPure : undefined,
-      declared: value,
-      args,
-      operationDescriptor,
-    });
-    return value;
-  }
-
   deriveAbstract(
     types: TypesDomain,
     values: ValuesDomain,

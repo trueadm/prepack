@@ -801,9 +801,10 @@ function run(args) {
           test.name.includes("react");
 
         let flagPermutations = [
-          [false, false, undefined],
-          [true, true, undefined],
-          [false, false, args.lazyObjectsRuntime],
+          [false, false, undefined, false],
+          [true, true, undefined, false],
+          [true, true, undefined, true],
+          [false, false, args.lazyObjectsRuntime, false],
         ];
         if (isAdditionalFunctionTest || isCaptureTest) {
           flagPermutations.push([false, false, undefined]);
@@ -813,15 +814,26 @@ function run(args) {
         return () =>
           SerialPromises(
             flagPermutations
-              .filter(function([delayInitializations, inlineExpressions, lazyObjectsRuntime]) {
+              .filter(function([
+                delayInitializations,
+                inlineExpressions,
+                lazyObjectsRuntime,
+                functionCallOutliningEnabled,
+              ]) {
                 return !(skipLazyObjects || args.noLazySupport) || !lazyObjectsRuntime;
               })
-              .map(function([delayInitializations, inlineExpressions, lazyObjectsRuntime]) {
+              .map(function([
+                delayInitializations,
+                inlineExpressions,
+                lazyObjectsRuntime,
+                functionCallOutliningEnabled,
+              ]) {
                 total++;
                 let options = {
                   delayInitializations,
                   inlineExpressions,
                   lazyObjectsRuntime,
+                  functionCallOutliningEnabled,
                 };
                 return () =>
                   runTest(test.name, test.file, options, args).then(testResult => {
