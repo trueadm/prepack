@@ -28,7 +28,7 @@ import invariant from "../invariant.js";
 import { Functions, Materialize, Properties, Utils } from "../singletons.js";
 import { PropertyDescriptor, cloneDescriptor } from "../descriptors.js";
 import { createOperationDescriptor, Generator } from "../utils/generator.js";
-import { Get } from "../methods/index.js";
+import { Get } from "./index.js";
 import { InternalCall } from "./function.js";
 import { valueIsKnownReactAbstraction } from "../react/utils.js";
 

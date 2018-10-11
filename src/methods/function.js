@@ -69,7 +69,7 @@ import type {
 } from "@babel/types";
 import * as t from "@babel/types";
 import { PropertyDescriptor } from "../descriptors.js";
-import { PossiblyOutlineInternalCall } from "./optional-function-inlining.js";
+import { PossiblyOutlineInternalCall } from "./function-outlining.js";
 
 export function InternalCall(
   realm: Realm,
