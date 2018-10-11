@@ -86,11 +86,11 @@ let prepackOptions = {
   stripFlow: true,
   optionallyInlineFunctionCalls: true,
   optionallyInlineFunctionCallsLossyConfig: {
-    ARRAY_ABSTRACT_PROPERTIES: true,
-    ARRAY_FUNCTION_PROPERTIES: true,
-    OBJECT_ABSTRACT_PROPERTIES: true,
+    ARRAY_ABSTRACT_PROPERTIES: false,
+    ARRAY_FUNCTION_PROPERTIES: false,
+    OBJECT_ABSTRACT_PROPERTIES: false,
     OBJECT_FUNCTION_PROPERTIES: false,
-    COMPLEX_ABSTRACT_CONDITIONS: true,
+    COMPLEX_ABSTRACT_CONDITIONS: false,
   },
 };
 let inputPath = path.resolve("fb-www/input.js");
