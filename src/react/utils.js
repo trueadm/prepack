@@ -148,40 +148,6 @@ export function valueIsKnownReactAbstraction(realm: Realm, value: Value): boolea
   return value instanceof AbstractObjectValue && realm.react.abstractHints.has(value);
 }
 
-// logger isn't typed otherwise it will increase flow cycle length :()
-export function valueIsReactLibraryObject(realm: Realm, value: ObjectValue, logger: any): boolean {
-  if (realm.fbLibraries.react === value) {
-    return true;
-  }
-  // we check that the object is the React or React-like library by checking for
-  // core properties that should exist on it
-  let reactVersion = logger.tryQuery(() => Get(realm, value, "version"), undefined);
-  if (!(reactVersion instanceof StringValue)) {
-    return false;
-  }
-  let reactCreateElement = logger.tryQuery(() => Get(realm, value, "createElement"), undefined);
-  if (!(reactCreateElement instanceof FunctionValue)) {
-    return false;
-  }
-  let reactCloneElement = logger.tryQuery(() => Get(realm, value, "cloneElement"), undefined);
-  if (!(reactCloneElement instanceof FunctionValue)) {
-    return false;
-  }
-  let reactIsValidElement = logger.tryQuery(() => Get(realm, value, "isValidElement"), undefined);
-  if (!(reactIsValidElement instanceof FunctionValue)) {
-    return false;
-  }
-  let reactComponent = logger.tryQuery(() => Get(realm, value, "Component"), undefined);
-  if (!(reactComponent instanceof FunctionValue)) {
-    return false;
-  }
-  let reactChildren = logger.tryQuery(() => Get(realm, value, "Children"), undefined);
-  if (!(reactChildren instanceof ObjectValue)) {
-    return false;
-  }
-  return false;
-}
-
 export function valueIsLegacyCreateClassComponent(realm: Realm, value: Value): boolean {
   if (!(value instanceof FunctionValue)) {
     return false;

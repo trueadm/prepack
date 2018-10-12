@@ -101,6 +101,22 @@ export class Serializer {
     return code;
   }
 
+  _executeModuleEntry({ entryModulePath, entryModuleSource }: string, onParse?: BabelNodeFile => void): void {
+    let realm = this.realm;
+    realm.moduleResolver.executeModule({ entryModulePath, entryModuleSource }, ast => {
+      let realmPreludeGenerator = realm.preludeGenerator;
+      invariant(realmPreludeGenerator);
+      let forbiddenNames = realmPreludeGenerator.nameGenerator.forbiddenNames;
+      traverseFast(ast, node => {
+        if (!t.isIdentifier(node)) return false;
+
+        forbiddenNames.add(((node: any): BabelNodeIdentifier).name);
+        return true;
+      });
+      if (onParse) onParse(ast);
+    });
+  }
+
   // When global.__output is an object, then this function replaces the global generator
   // with one that declares global variables corresponding to the key-value pairs in the __output object,
   // effectively rewriting the roots for visiting/serialization.
@@ -121,6 +137,50 @@ export class Serializer {
       generator.emitGlobalDeclaration(name, value);
     }
     return true;
+  }
+
+  initEntryModule(
+    { entryModulePath, entryModuleSource },
+    onParse?: BabelNodeFile => void,
+    onExecute?: (Realm, Map<FunctionValue, Generator>) => void
+  ): void | SerializedResult {
+    let realmStatistics = this.realm.statistics;
+    invariant(realmStatistics instanceof SerializerStatistics, "serialization requires SerializerStatistics");
+    let statistics: SerializerStatistics = realmStatistics;
+
+    let result = statistics.total.measure(() => {
+      // Phase 1: Let's interpret.
+      if (this.realm.react.verbose) {
+        this.logger.logInformation(`Evaluating initialization path...`);
+      }
+      this._executeModuleEntry({ entryModulePath, entryModuleSource }, onParse);
+
+      if (this.logger.hasErrors()) return undefined;
+
+      let reactStatistics = this._evaluateOptimizedFunctionsAndReactComponentTrees(statistics, onExecute);
+
+      // Phase 2: Let's serialize the heap and generate code.
+      let [ast, heapGraph] = this._serializeHeapToAst(statistics);
+
+      invariant(ast !== undefined);
+      if (this.realm.stripFlow) {
+        stripFlowTypeAnnotations(ast);
+      }
+
+      // the signature for generate is not complete, hence the any
+      let generated = statistics.babelGenerate.measure(() => generate(ast));
+
+      invariant(!this.logger.hasErrors());
+      return {
+        code: generated.code,
+        map: generated.map,
+        statistics,
+        reactStatistics,
+        heapGraph,
+      };
+    });
+
+    return result;
   }
 
   init(
@@ -147,28 +207,7 @@ export class Serializer {
         statistics.resolveInitializedModules.measure(() => this.modules.resolveInitializedModules());
       }
 
-      statistics.checkThatFunctionsAreIndependent.measure(() => this.functions.checkThatFunctionsAreIndependent());
-
-      let reactStatistics;
-      if (this.realm.react.enabled) {
-        statistics.optimizeReactComponentTreeRoots.measure(() => {
-          reactStatistics = new ReactStatistics();
-          this.functions.optimizeReactComponentTreeRoots(reactStatistics);
-        });
-      }
-
-      statistics.processCollectedNestedOptimizedFunctions.measure(() =>
-        this.functions.processCollectedNestedOptimizedFunctions()
-      );
-
-      statistics.dumpIR.measure(() => {
-        if (onExecute !== undefined) {
-          let optimizedFunctions = new Map();
-          for (let [functionValue, additionalFunctionEffects] of this.functions.getAdditionalFunctionValuesToEffects())
-            optimizedFunctions.set(functionValue, additionalFunctionEffects.generator);
-          onExecute(this.realm, optimizedFunctions);
-        }
-      });
+      let reactStatistics = this._evaluateOptimizedFunctionsAndReactComponentTrees(statistics, onExecute);
 
       let modulesToInitialize = this.options.modulesToInitialize;
       if (modulesToInitialize) {
@@ -176,125 +215,8 @@ export class Serializer {
         if (this.logger.hasErrors()) return undefined;
       }
 
-      let heapGraph;
-      let ast = (() => {
-        // We wrap the following in an anonymous function declaration to ensure
-        // that all local variables are locally scoped, and allocated memory cannot
-        // get released when this function returns.
-
-        let additionalFunctionValuesAndEffects = this.functions.getAdditionalFunctionValuesToEffects();
-
-        // Deep traversal of the heap to identify the necessary scope of residual functions
-        let preludeGenerator = this.realm.preludeGenerator;
-        invariant(preludeGenerator !== undefined);
-        if (this.realm.react.verbose) {
-          this.logger.logInformation(`Visiting evaluated nodes...`);
-        }
-        let [residualHeapInfo, generatorTree, inspector] = (() => {
-          let residualHeapVisitor = new ResidualHeapVisitor(
-            this.realm,
-            this.logger,
-            this.modules,
-            additionalFunctionValuesAndEffects
-          );
-          statistics.deepTraversal.measure(() => residualHeapVisitor.visitRoots());
-          return [residualHeapVisitor.toInfo(), residualHeapVisitor.generatorTree, residualHeapVisitor.inspector];
-        })();
-        if (this.logger.hasErrors()) return undefined;
-
-        let residualOptimizedFunctions = new ResidualOptimizedFunctions(
-          generatorTree,
-          additionalFunctionValuesAndEffects,
-          residualHeapInfo.values
-        );
-        let referentializer = new Referentializer(
-          this.realm,
-          this.options,
-          preludeGenerator.createNameGenerator("__scope_"),
-          preludeGenerator.createNameGenerator("__get_scope_binding_"),
-          preludeGenerator.createNameGenerator("__leaked_"),
-          residualOptimizedFunctions
-        );
-        statistics.referentialization.measure(() => {
-          for (let instance of residualHeapInfo.functionInstances.values()) referentializer.referentialize(instance);
-        });
-
-        if (this.realm.react.verbose) {
-          this.logger.logInformation(`Serializing evaluated nodes...`);
-        }
-        const realmPreludeGenerator = this.realm.preludeGenerator;
-        invariant(realmPreludeGenerator);
-        const residualHeapValueIdentifiers = new ResidualHeapValueIdentifiers(
-          residualHeapInfo.values.keys(),
-          realmPreludeGenerator
-        );
-
-        if (this.options.heapGraphFormat) {
-          const heapRefCounter = new ResidualHeapRefCounter(
-            this.realm,
-            this.logger,
-            this.modules,
-            additionalFunctionValuesAndEffects
-          );
-          heapRefCounter.visitRoots();
-
-          const heapGraphGenerator = new ResidualHeapGraphGenerator(
-            this.realm,
-            this.logger,
-            this.modules,
-            additionalFunctionValuesAndEffects,
-            residualHeapValueIdentifiers,
-            heapRefCounter.getResult()
-          );
-          heapGraphGenerator.visitRoots();
-          invariant(this.options.heapGraphFormat);
-          heapGraph = heapGraphGenerator.generateResult(this.options.heapGraphFormat);
-        }
-
-        // Phase 2: Let's serialize the heap and generate code.
-        // Serialize for the first time in order to gather reference counts
-
-        if (this.options.inlineExpressions) {
-          residualHeapValueIdentifiers.initPass1();
-          statistics.referenceCounts.measure(() => {
-            new ResidualHeapSerializer(
-              this.realm,
-              this.logger,
-              this.modules,
-              residualHeapValueIdentifiers,
-              inspector,
-              residualHeapInfo,
-              this.options,
-              additionalFunctionValuesAndEffects,
-              referentializer,
-              generatorTree,
-              residualOptimizedFunctions
-            ).serialize();
-          });
-          if (this.logger.hasErrors()) return undefined;
-          residualHeapValueIdentifiers.initPass2();
-        }
-
-        // Serialize for a second time, using reference counts to minimize number of generated identifiers
-        const TargetSerializer =
-          this.options.lazyObjectsRuntime != null ? LazyObjectsSerializer : ResidualHeapSerializer;
-        statistics.resetBeforePass();
-        return statistics.serializePass.measure(() =>
-          new TargetSerializer(
-            this.realm,
-            this.logger,
-            this.modules,
-            residualHeapValueIdentifiers,
-            inspector,
-            residualHeapInfo,
-            this.options,
-            additionalFunctionValuesAndEffects,
-            referentializer,
-            generatorTree,
-            residualOptimizedFunctions
-          ).serialize()
-        );
-      })();
+      // Phase 2: Let's serialize the heap and generate code.
+      let [ast, heapGraph] = this._serializeHeapToAst(statistics);
 
       invariant(ast !== undefined);
       if (this.realm.stripFlow) {
@@ -333,5 +255,148 @@ export class Serializer {
     }
 
     return result;
+  }
+
+  _serializeHeapToAst(statistics: SerializerStatistics) {
+    let heapGraph;
+    let additionalFunctionValuesAndEffects = this.functions.getAdditionalFunctionValuesToEffects();
+
+    // Deep traversal of the heap to identify the necessary scope of residual functions
+    let preludeGenerator = this.realm.preludeGenerator;
+    invariant(preludeGenerator !== undefined);
+    if (this.realm.react.verbose) {
+      this.logger.logInformation(`Visiting evaluated nodes...`);
+    }
+    let [residualHeapInfo, generatorTree, inspector] = (() => {
+      let residualHeapVisitor = new ResidualHeapVisitor(
+        this.realm,
+        this.logger,
+        this.modules,
+        additionalFunctionValuesAndEffects
+      );
+      statistics.deepTraversal.measure(() => residualHeapVisitor.visitRoots());
+      return [residualHeapVisitor.toInfo(), residualHeapVisitor.generatorTree, residualHeapVisitor.inspector];
+    })();
+    if (this.logger.hasErrors()) return undefined;
+
+    let residualOptimizedFunctions = new ResidualOptimizedFunctions(
+      generatorTree,
+      additionalFunctionValuesAndEffects,
+      residualHeapInfo.values
+    );
+    let referentializer = new Referentializer(
+      this.realm,
+      this.options,
+      preludeGenerator.createNameGenerator("__scope_"),
+      preludeGenerator.createNameGenerator("__get_scope_binding_"),
+      preludeGenerator.createNameGenerator("__leaked_"),
+      residualOptimizedFunctions
+    );
+    statistics.referentialization.measure(() => {
+      for (let instance of residualHeapInfo.functionInstances.values()) referentializer.referentialize(instance);
+    });
+
+    if (this.realm.react.verbose) {
+      this.logger.logInformation(`Serializing evaluated nodes...`);
+    }
+    const realmPreludeGenerator = this.realm.preludeGenerator;
+    invariant(realmPreludeGenerator);
+    const residualHeapValueIdentifiers = new ResidualHeapValueIdentifiers(
+      residualHeapInfo.values.keys(),
+      realmPreludeGenerator
+    );
+
+    if (this.options.heapGraphFormat) {
+      const heapRefCounter = new ResidualHeapRefCounter(
+        this.realm,
+        this.logger,
+        this.modules,
+        additionalFunctionValuesAndEffects
+      );
+      heapRefCounter.visitRoots();
+
+      const heapGraphGenerator = new ResidualHeapGraphGenerator(
+        this.realm,
+        this.logger,
+        this.modules,
+        additionalFunctionValuesAndEffects,
+        residualHeapValueIdentifiers,
+        heapRefCounter.getResult()
+      );
+      heapGraphGenerator.visitRoots();
+      invariant(this.options.heapGraphFormat);
+      heapGraph = heapGraphGenerator.generateResult(this.options.heapGraphFormat);
+    }
+
+    // Serialize for the first time in order to gather reference counts
+    if (this.options.inlineExpressions) {
+      residualHeapValueIdentifiers.initPass1();
+      statistics.referenceCounts.measure(() => {
+        new ResidualHeapSerializer(
+          this.realm,
+          this.logger,
+          this.modules,
+          residualHeapValueIdentifiers,
+          inspector,
+          residualHeapInfo,
+          this.options,
+          additionalFunctionValuesAndEffects,
+          referentializer,
+          generatorTree,
+          residualOptimizedFunctions
+        ).serialize();
+      });
+      if (this.logger.hasErrors()) return undefined;
+      residualHeapValueIdentifiers.initPass2();
+    }
+
+    // Serialize for a second time, using reference counts to minimize number of generated identifiers
+    const TargetSerializer = this.options.lazyObjectsRuntime != null ? LazyObjectsSerializer : ResidualHeapSerializer;
+    statistics.resetBeforePass();
+    let ast = statistics.serializePass.measure(() =>
+      new TargetSerializer(
+        this.realm,
+        this.logger,
+        this.modules,
+        residualHeapValueIdentifiers,
+        inspector,
+        residualHeapInfo,
+        this.options,
+        additionalFunctionValuesAndEffects,
+        referentializer,
+        generatorTree,
+        residualOptimizedFunctions
+      ).serialize()
+    );
+    return [ast, heapGraph];
+  }
+
+  _evaluateOptimizedFunctionsAndReactComponentTrees(
+    statistics: SerializerStatistics,
+    onExecute?: (Realm, Map<FunctionValue, Generator>) => void
+  ): ReactStatistics | void {
+    statistics.checkThatFunctionsAreIndependent.measure(() => this.functions.checkThatFunctionsAreIndependent());
+
+    let reactStatistics;
+    if (this.realm.react.enabled) {
+      statistics.optimizeReactComponentTreeRoots.measure(() => {
+        reactStatistics = new ReactStatistics();
+        this.functions.optimizeReactComponentTreeRoots(reactStatistics);
+      });
+    }
+
+    statistics.processCollectedNestedOptimizedFunctions.measure(() =>
+      this.functions.processCollectedNestedOptimizedFunctions()
+    );
+
+    statistics.dumpIR.measure(() => {
+      if (onExecute !== undefined) {
+        let optimizedFunctions = new Map();
+        for (let [functionValue, additionalFunctionEffects] of this.functions.getAdditionalFunctionValuesToEffects())
+          optimizedFunctions.set(functionValue, additionalFunctionEffects.generator);
+        onExecute(this.realm, optimizedFunctions);
+      }
+    });
+    return reactStatistics;
   }
 }

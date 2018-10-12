@@ -337,7 +337,7 @@ export class ResidualOperationSerializer {
       case "REACT_NATIVE_STRING_LITERAL":
         babelNode = this._serializeReactNativeStringLiteral(data, nodes);
         break;
-      case "REACT_RELAY_MOCK_CONTAINER":
+      case "REACT_RELAY_CONTAINER":
         babelNode = this._serializeReactRelayMockContainer(data, nodes);
         break;
 

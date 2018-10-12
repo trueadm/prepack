@@ -13,7 +13,7 @@
 // put the input fb-www file in ${root}/fb-www/input.js
 // the compiled file will be saved to ${root}/fb-www/output.js
 
-let prepackSources = require("../lib/prepack-node.js").prepackSources;
+let prepackModules = require("../lib/prepack-node.js").prepackModules;
 let path = require("path");
 let { readFile, writeFile, existsSync } = require("fs");
 let { promisify } = require("util");
@@ -91,11 +91,12 @@ let componentsListPath = path.resolve("fb-www/components.txt");
 let components = new Map();
 let startTime = Date.now();
 let uniqueEvaluatedComponents = 0;
+let moduleResolverPath = path.join(__dirname, "../test/react/test-module-resolver.js");
 
-function compileSource(source) {
+function compileSource() {
   let serialized;
   try {
-    serialized = prepackSources([{ filePath: inputPath, fileContents: source, sourceMapContents: "" }], prepackOptions);
+    serialized = prepackModules({ entryModulePath: inputPath, moduleResolverPath }, prepackOptions);
   } catch (e) {
     console.log(`\n${chalk.inverse(`=== Diagnostics Log ===`)}\n`);
     errorsCaptured.forEach(error => printError(error));
@@ -131,8 +132,7 @@ function lintCompiledSource(source) {
 }
 
 async function compileFile() {
-  let source = await readFileAsync(inputPath, "utf8");
-  let { stats, code } = await compileSource(source);
+  let { stats, code } = await compileSource();
   await writeFileAsync(outputPath, code);
   lintCompiledSource(code);
   // $FlowFixMe: no idea what this is about

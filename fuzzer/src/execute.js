@@ -55,7 +55,7 @@ const prepackOptions = {
     if (diag.severity !== "Warning") return "Fail";
     return "Recover";
   },
-  compatibility: "fb-www",
+  compatibility: "fb",
   internalDebug: true,
   serialize: true,
   uniqueSuffix: "",

@@ -88,6 +88,7 @@ import {
   InternalSlotDescriptor,
   PropertyDescriptor,
 } from "./descriptors.js";
+import type { ModuleResolver } from "./module-resolution.js";
 import type { BabelNode, BabelNodeSourceLocation, BabelNodeLVal } from "@babel/types";
 export type BindingEntry = { hasLeaked: boolean, value: void | Value };
 export type Bindings = Map<Binding, BindingEntry>;
@@ -331,15 +332,6 @@ export class Realm {
     this.alreadyDescribedLocations = new WeakMap();
     this.stripFlow = opts.stripFlow || false;
 
-    this.fbLibraries = {
-      other: new Map(),
-      react: undefined,
-      reactDom: undefined,
-      reactDomServer: undefined,
-      reactNative: undefined,
-      reactRelay: undefined,
-    };
-
     this.errorHandler = opts.errorHandler;
 
     this.globalSymbolRegistry = [];
@@ -367,6 +359,8 @@ export class Realm {
   invariantMode: InvariantModeTypes;
   ignoreLeakLogic: boolean;
   emitConcreteModel: boolean;
+
+  moduleResolver: void | ModuleResolver;
 
   abstractValueImpliesMax: number;
   abstractValueImpliesCounter: number;
@@ -408,7 +402,7 @@ export class Realm {
     // reactHints are generated to help improve the effeciency of the React reconciler when
     // operating on a tree of React components. We can use reactHint to mark AbstractValues
     // with extra data that helps us traverse through the tree that would otherwise not be possible
-    // (for example, when we use Relay's React containers with "fb-www" – which are AbstractObjectValues,
+    // (for example, when we use Relay's React containers with "fb" – which are AbstractObjectValues,
     // we need to know what React component was passed to this AbstractObjectValue so we can visit it next)
     abstractHints: WeakMap<AbstractValue | ObjectValue, ReactHint>,
     activeReconciler: any, // inentionally "any", importing the React reconciler class increases Flow's cylic count
@@ -434,16 +428,6 @@ export class Realm {
   };
   alreadyDescribedLocations: WeakMap<FunctionValue | BabelNodeSourceLocation, string | void>;
   stripFlow: boolean;
-
-  fbLibraries: {
-    other: Map<string, AbstractValue>,
-    react: void | ObjectValue,
-    reactDom: void | ObjectValue,
-    reactDomServer: void | ObjectValue,
-    reactNative: void | ObjectValue,
-    reactRelay: void | ObjectValue,
-  };
-
   $GlobalObject: ObjectValue | AbstractObjectValue;
   compatibility: Compatibility;
 

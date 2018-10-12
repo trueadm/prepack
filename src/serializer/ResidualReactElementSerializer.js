@@ -116,7 +116,7 @@ export class ResidualReactElementSerializer {
   }
 
   _getReactLibraryValue(): AbstractObjectValue | ObjectValue {
-    let reactLibraryObject = this.realm.fbLibraries.react;
+    let reactLibraryObject = this.realm.moduleResolver.import("react");
     // if there is no React library, then we should throw and error
     if (reactLibraryObject === undefined) {
       throw new FatalError("unable to find React library reference in scope");

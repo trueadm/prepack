@@ -78,6 +78,14 @@ export type ConsoleMethodTypes =
   | "trace"
   | "warn";
 
+export type InternalPrepackModules = {
+  loadInternalReact: (name: string) => Value,
+  loadInternalReactDOM: (name: string) => Value,
+  loadInternalReactNative: (name: string) => Value,
+  loadInternalPropTypes: (name: string) => Value,
+  loadInternalReactRelay: (name: string) => Value,
+};
+
 export type IterationKind = "key+value" | "value" | "key";
 
 export type SourceType = "module" | "script";

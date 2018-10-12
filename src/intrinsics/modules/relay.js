@@ -23,7 +23,7 @@ import { Get } from "../../methods/index.js";
 import invariant from "../../invariant.js";
 import { createReactHintObject } from "../../react/utils.js";
 import { parseExpression } from "@babel/parser";
-import { addMockFunctionToObject } from "./utils.js";
+import { addFunctionToObject } from "./utils.js";
 import { createOperationDescriptor } from "../../utils/generator.js";
 
 let reactRelayCode = `
@@ -114,12 +114,12 @@ function createReactRelayContainer(
   // we create a ReactRelay container function that returns an abstract object
   // allowing us to reconstruct this ReactReact.createSomeContainer(...) again
   // we also pass a reactHint so the reconciler can properly deal with this
-  addMockFunctionToObject(realm, reactRelay, relayRequireName, containerName, (funcValue, args) => {
+  addFunctionToObject(realm, reactRelay, relayRequireName, containerName, (funcValue, args) => {
     let value = AbstractValue.createTemporalFromBuildFunction(
       realm,
       FunctionValue,
       [reactRelay, new StringValue(realm, containerName), ...args],
-      createOperationDescriptor("REACT_RELAY_MOCK_CONTAINER"),
+      createOperationDescriptor("REACT_RELAY_CONTAINER"),
       { skipInvariant: true, isPure: true }
     );
     invariant(value instanceof AbstractValue);
@@ -138,12 +138,12 @@ function createReactRelayContainer(
   });
 }
 
-export function createMockReactRelay(realm: Realm, relayRequireName: string): ObjectValue {
+export function createReactRelay(realm: Realm, relayRequireName: string): ObjectValue {
   let reactRelayFirstRenderFactory = Environment.GetValue(realm, realm.$GlobalEnv.evaluate(reactRelayAst, false));
   invariant(reactRelayFirstRenderFactory instanceof ECMAScriptSourceFunctionValue);
   let factory = reactRelayFirstRenderFactory.$Call;
   invariant(factory !== undefined);
-  invariant(realm.fbLibraries.react instanceof ObjectValue, "mock ReactRelay cannot be required before mock React");
+  invariant(realm.fbLibraries.react instanceof ObjectValue, "ReactRelay cannot be required before React");
   let reactRelayFirstRenderValue = factory(realm.intrinsics.undefined, [realm.fbLibraries.react]);
   invariant(reactRelayFirstRenderValue instanceof ObjectValue);
 

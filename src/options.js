@@ -11,8 +11,8 @@
 
 import type { ErrorHandler } from "./errors.js";
 
-export type Compatibility = "browser" | "jsc-600-1-4-17" | "mobile" | "node-source-maps" | "fb-www" | "node-react";
-export const CompatibilityValues = ["browser", "jsc-600-1-4-17", "mobile", "node-source-maps", "fb-www", "node-react"];
+export type Compatibility = "browser" | "jsc-600-1-4-17" | "mobile" | "node-source-maps" | "fb" | "node-react";
+export const CompatibilityValues = ["browser", "jsc-600-1-4-17", "mobile", "node-source-maps", "fb", "node-react"];
 
 export type InvariantModeTypes =
   | "throw"

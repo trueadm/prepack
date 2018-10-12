@@ -224,9 +224,13 @@ export function GlobalDeclarationInstantiation(
 }
 
 export default function(ast: BabelNodeProgram, strictCode: boolean, env: LexicalEnvironment, realm: Realm): Value {
-  strictCode = IsStrict(ast);
-
-  GlobalDeclarationInstantiation(realm, ast, env, strictCode);
+  if (ast.sourceType === "module") {
+    // Modules are always strict mode
+    Environment.BlockDeclarationInstantiation(realm, true, ast.body, env);
+  } else {
+    strictCode = IsStrict(ast);
+    GlobalDeclarationInstantiation(realm, ast, env, strictCode);
+  }
 
   let val, res;
 

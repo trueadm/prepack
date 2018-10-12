@@ -43,7 +43,7 @@ export function updateIntrinsicNames(
   }
 }
 
-export function addMockFunctionToObject(
+export function addFunctionToObject(
   realm: Realm,
   obj: ObjectValue,
   requireName: string,

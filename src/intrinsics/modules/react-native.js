@@ -1431,7 +1431,7 @@ let reactNativeCode = `
     function TouchableText(props) {
       var newProps = props;
       if (isTouchable(newProps)) {
-        throw new Error("TODO: mocked TouchableText does not handle touch events");
+        throw new Error("TODO: TouchableText does not handle touch events");
       }
       if (props.selectionColor != null) {
         newProps = Object.assign({}, props, {
@@ -1652,7 +1652,7 @@ let reactNativeCode = `
 
 let reactNativeAst = parseExpression(reactNativeCode, { plugins: ["flow"] });
 
-export function createMockReactNative(realm: Realm, reactNativeRequireName: string): ObjectValue {
+export function createReactNative(realm: Realm, reactNativeRequireName: string): ObjectValue {
   let reactNativeFactory = Environment.GetValue(realm, realm.$GlobalEnv.evaluate(reactNativeAst, false));
   invariant(reactNativeFactory instanceof ECMAScriptSourceFunctionValue);
   let factory = reactNativeFactory.$Call;

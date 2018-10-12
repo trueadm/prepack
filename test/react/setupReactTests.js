@@ -11,7 +11,7 @@
 
 let fs = require("fs");
 let path = require("path");
-let { prepackSources } = require("../../lib/prepack-node.js");
+let { prepackModules } = require("../../lib/prepack-node.js");
 let babel = require("babel-core");
 let React = require("react");
 let ReactDOM = require("react-dom");
@@ -103,7 +103,7 @@ const babelHelpers = {
 
 function setupReactTests() {
   function compileSourceWithPrepack(
-    source: string,
+    entryModuleSource: string,
     useJSXOutput: boolean,
     diagnosticLog: mixed[],
     shouldRecover: (errorCode: string) => boolean
@@ -111,9 +111,6 @@ function setupReactTests() {
     compiledSource: string,
     statistics: Object,
   |} {
-    let code = `(function() {
-${source}
-})()`;
     let prepackOptions = {
       errorHandler: diag => {
         diagnosticLog.push(diag);
@@ -125,7 +122,7 @@ ${source}
         }
         return "Recover";
       },
-      compatibility: "fb-www",
+      compatibility: "fb",
       internalDebug: true,
       serialize: true,
       uniqueSuffix: "",
@@ -138,7 +135,8 @@ ${source}
       invariantLevel: 0,
       stripFlow: true,
     };
-    const serialized = prepackSources([{ filePath: "", fileContents: code, sourceMapContents: "" }], prepackOptions);
+    const moduleResolverPath = __dirname + "/test/react/test-module-resolver.js";
+    const serialized = prepackModules({ entryModuleSource, moduleResolverPath }, prepackOptions);
     if (serialized == null || serialized.reactStatistics == null) {
       throw new Error("React test runner failed during serialization");
     }

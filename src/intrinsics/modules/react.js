@@ -28,7 +28,7 @@ import { createInternalReactElement, getReactSymbol } from "../../react/utils.js
 import { cloneReactElement, createReactElement } from "../../react/elements.js";
 import { Properties, Create, To } from "../../singletons.js";
 import invariant from "../../invariant.js";
-import { updateIntrinsicNames, addMockFunctionToObject } from "./utils.js";
+import { updateIntrinsicNames, addFunctionToObject } from "./utils.js";
 import { createOperationDescriptor } from "../../utils/generator.js";
 
 // most of the code here was taken from https://github.com/facebook/react/blob/master/packages/react/src/ReactElement.js
@@ -76,7 +76,7 @@ let reactCode = `
       this.context = context;
       this.refs = {};
       this.setState = function () {}; // NO-OP
-      this.setState.__PREPACK_MOCK__ = true;
+      this.setState.__PREPACK_MODEL__ = true;
     }
 
     Component.prototype.isReactComponent = {};
@@ -86,7 +86,7 @@ let reactCode = `
       this.context = context;
       this.refs = {};
       this.setState = function () {}; // NO-OP
-      this.setState.__PREPACK_MOCK__ = true;
+      this.setState.__PREPACK_MODEL__ = true;
     }
 
     PureComponent.prototype.isReactComponent = {};
@@ -408,7 +408,7 @@ let reactCode = `
 `;
 let reactAst = parseExpression(reactCode, { plugins: ["flow"] });
 
-export function createMockReact(realm: Realm, reactRequireName: string): ObjectValue {
+export function createReact(realm: Realm, reactRequireName: string): ObjectValue {
   let reactFactory = Environment.GetValue(realm, realm.$GlobalEnv.evaluate(reactAst, false));
   invariant(reactFactory instanceof ECMAScriptSourceFunctionValue);
 
@@ -421,7 +421,7 @@ export function createMockReact(realm: Realm, reactRequireName: string): ObjectV
   let factory = reactFactory.$Call;
   invariant(factory !== undefined);
 
-  let mockReactElementBuilder = new NativeFunctionValue(
+  let reactElementBuilder = new NativeFunctionValue(
     realm,
     undefined,
     "ReactElement",
@@ -437,13 +437,13 @@ export function createMockReact(realm: Realm, reactRequireName: string): ObjectV
     getReactSymbol("react.fragment", realm),
     getReactSymbol("react.portal", realm),
     getReactSymbol("react.forward_ref", realm),
-    mockReactElementBuilder,
+    reactElementBuilder,
     currentOwner,
   ]);
   invariant(reactValue instanceof ObjectValue);
   reactValue.refuseSerialization = true;
 
-  // update existing properties with the new intrinsic mock values
+  // update existing properties with the new intrinsic values
   updateIntrinsicNames(realm, reactValue, reactRequireName, [
     "PropTypes",
     "Children",
@@ -452,43 +452,37 @@ export function createMockReact(realm: Realm, reactRequireName: string): ObjectV
     { name: "PureComponent", updatePrototype: true },
   ]);
 
-  addMockFunctionToObject(
-    realm,
-    reactValue,
-    reactRequireName,
-    "createElement",
-    (context, [type, config, ...children]) => {
-      invariant(type instanceof Value);
-      // if config is undefined/null, use an empy object
-      if (config === realm.intrinsics.undefined || config === realm.intrinsics.null || config === undefined) {
-        config = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
-      }
-      if (config instanceof AbstractValue && !(config instanceof AbstractObjectValue)) {
-        config = To.ToObject(realm, config);
-      }
-      invariant(config instanceof ObjectValue || config instanceof AbstractObjectValue);
-
-      if (Array.isArray(children)) {
-        if (children.length === 0) {
-          children = undefined;
-        } else if (children.length === 1) {
-          children = children[0];
-        } else {
-          let array = Create.ArrayCreate(realm, 0);
-          let length = children.length;
-
-          for (let i = 0; i < length; i++) {
-            Create.CreateDataPropertyOrThrow(realm, array, "" + i, children[i]);
-          }
-          children = array;
-          children.makeFinal();
-        }
-      }
-      return createReactElement(realm, type, config, children);
+  addFunctionToObject(realm, reactValue, reactRequireName, "createElement", (context, [type, config, ...children]) => {
+    invariant(type instanceof Value);
+    // if config is undefined/null, use an empy object
+    if (config === realm.intrinsics.undefined || config === realm.intrinsics.null || config === undefined) {
+      config = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
     }
-  );
+    if (config instanceof AbstractValue && !(config instanceof AbstractObjectValue)) {
+      config = To.ToObject(realm, config);
+    }
+    invariant(config instanceof ObjectValue || config instanceof AbstractObjectValue);
 
-  addMockFunctionToObject(
+    if (Array.isArray(children)) {
+      if (children.length === 0) {
+        children = undefined;
+      } else if (children.length === 1) {
+        children = children[0];
+      } else {
+        let array = Create.ArrayCreate(realm, 0);
+        let length = children.length;
+
+        for (let i = 0; i < length; i++) {
+          Create.CreateDataPropertyOrThrow(realm, array, "" + i, children[i]);
+        }
+        children = array;
+        children.makeFinal();
+      }
+    }
+    return createReactElement(realm, type, config, children);
+  });
+
+  addFunctionToObject(
     realm,
     reactValue,
     reactRequireName,
@@ -524,7 +518,7 @@ export function createMockReact(realm: Realm, reactRequireName: string): ObjectV
     }
   );
 
-  addMockFunctionToObject(
+  addFunctionToObject(
     realm,
     reactValue,
     reactRequireName,
@@ -567,7 +561,7 @@ export function createMockReact(realm: Realm, reactRequireName: string): ObjectV
     }
   );
 
-  addMockFunctionToObject(realm, reactValue, reactRequireName, "createRef", funcVal => {
+  addFunctionToObject(realm, reactValue, reactRequireName, "createRef", funcVal => {
     let createRef = AbstractValue.createTemporalFromBuildFunction(
       realm,
       FunctionValue,

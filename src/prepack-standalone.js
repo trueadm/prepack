@@ -14,6 +14,8 @@
 import Serializer from "./serializer/index.js";
 import construct_realm from "./construct_realm.js";
 import initializeGlobals from "./globals.js";
+import initializeInternalModules from "./intrinsics/modules/index.js";
+import { initializeModuleResolver } from "./module-resolution.js";
 import { EvaluateDirectCallWithArgList } from "./methods/index.js";
 import { getRealmOptions, getSerializerOptions } from "./prepack-options";
 import { FatalError } from "./errors.js";
@@ -84,6 +86,44 @@ export function prepackSources(
 
     return serialized;
   }
+}
+
+export function prepackModules(
+  { entryModulePath, entryModuleSource, moduleResolverPath },
+  options: PrepackOptions = defaultOptions
+): SerializedResult {
+  let realmOptions = getRealmOptions(options);
+  realmOptions.errorHandler = options.errorHandler;
+  let realm = construct_realm(
+    realmOptions,
+    options.debuggerConfigArgs,
+    new SerializerStatistics(),
+    options.debugReproArgs
+  );
+  initializeGlobals(realm);
+  if (typeof options.additionalGlobals === "function") {
+    options.additionalGlobals(realm);
+  }
+
+  let internalModules = initializeInternalModules(realm);
+  initializeModuleResolver(realm, moduleResolverPath, internalModules);
+  let serializer = new Serializer(realm, getSerializerOptions(options));
+  let serialized = serializer.initEntryModule(
+    { entryModulePath, entryModuleSource },
+    options.onParse,
+    options.onExecute
+  );
+
+  //Turn off the debugger if there is one
+  if (realm.debuggerInstance) {
+    realm.debuggerInstance.shutdown();
+  }
+
+  if (!serialized) {
+    throw new FatalError("serializer failed");
+  }
+
+  return serialized;
 }
 
 function checkResidualFunctions(modules: Modules, startFunc: number, totalToAnalyze: number) {

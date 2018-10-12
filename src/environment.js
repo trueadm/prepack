@@ -213,6 +213,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
       isGlobal: isGlobal,
       mightHaveBeenCaptured: false,
       hasLeaked: false,
+      indirect: false,
     });
 
     // 4. Return NormalCompletion(empty).
@@ -240,6 +241,7 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
       isGlobal: isGlobal,
       mightHaveBeenCaptured: false,
       hasLeaked: false,
+      indirect: false,
     };
     this.bindings[N] = skipRecord ? binding : realm.recordModifiedBinding(binding);
 
@@ -1059,6 +1061,46 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
     }
 
     // 12. Return NormalCompletion(empty).
+  }
+}
+
+// ECMA262 8.1.1.5
+export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
+  // ECMA262 8.1.1.5.1
+  GetBindingValue(N: string, S: boolean): Value {
+    let realm = this.realm;
+
+    // 2. Assert: S is true.
+    invariant(S === true, "strict mode should be true in modules");
+
+    // 2. Let envRec be the module Environment Record for which the method was invoked.
+    let envRec = this;
+
+    let binding = envRec.bindings[N];
+
+    // 3. Assert: envRec has a binding for N.
+    invariant(binding, "expected binding");
+
+    // 4. If the binding for N is an indirect binding, then
+    if (binding.indirect) {
+      // a. Let M and N2 be the indirection values provided when this binding for N was created.
+      // b. Let targetEnv be M.[[Environment]].
+      // c. If targetEnv is undefined, throw a ReferenceError exception.
+      // d. Let targetER be targetEnv's EnvironmentRecord.
+      // Return ? targetER.GetBindingValue(N2, true).
+    }
+
+    // 5. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
+    if (!binding.initialized) {
+      throw realm.createErrorThrowCompletion(realm.intrinsics.ReferenceError);
+    }
+
+    // 6. Return the value currently bound to N in envRec.
+    return binding.value;
+  }
+
+  DeleteBinding(N: string): boolean {
+    invariant(false, "this method should never be invoked");
   }
 }
 

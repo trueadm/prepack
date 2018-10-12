@@ -13,11 +13,11 @@ import type { Realm } from "../../realm.js";
 import { ObjectValue, AbstractObjectValue, AbstractValue, FunctionValue } from "../../values/index.js";
 import { createReactHintObject, isReactElement } from "../../react/utils.js";
 import invariant from "../../invariant.js";
-import { updateIntrinsicNames, addMockFunctionToObject } from "./utils.js";
+import { updateIntrinsicNames, addFunctionToObject } from "./utils.js";
 import { renderToString } from "../../react/experimental-server-rendering/rendering.js";
 import { createOperationDescriptor } from "../../utils/generator.js";
 
-export function createMockReactDOM(realm: Realm, reactDomRequireName: string): ObjectValue {
+export function createReactDOM(realm: Realm, reactDomRequireName: string): ObjectValue {
   let reactDomValue = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
   reactDomValue.refuseSerialization = true;
 
@@ -35,10 +35,10 @@ export function createMockReactDOM(realm: Realm, reactDomRequireName: string): O
     return reactDomMethod;
   };
 
-  addMockFunctionToObject(realm, reactDomValue, reactDomRequireName, "render", genericTemporalFunc);
-  addMockFunctionToObject(realm, reactDomValue, reactDomRequireName, "hydrate", genericTemporalFunc);
-  addMockFunctionToObject(realm, reactDomValue, reactDomRequireName, "findDOMNode", genericTemporalFunc);
-  addMockFunctionToObject(realm, reactDomValue, reactDomRequireName, "unmountComponentAtNode", genericTemporalFunc);
+  addFunctionToObject(realm, reactDomValue, reactDomRequireName, "render", genericTemporalFunc);
+  addFunctionToObject(realm, reactDomValue, reactDomRequireName, "hydrate", genericTemporalFunc);
+  addFunctionToObject(realm, reactDomValue, reactDomRequireName, "findDOMNode", genericTemporalFunc);
+  addFunctionToObject(realm, reactDomValue, reactDomRequireName, "unmountComponentAtNode", genericTemporalFunc);
 
   const createPortalFunc = (funcVal, [reactPortalValue, domNodeValue]) => {
     let reactDomMethod = AbstractValue.createTemporalFromBuildFunction(
@@ -56,14 +56,14 @@ export function createMockReactDOM(realm: Realm, reactDomRequireName: string): O
     return reactDomMethod;
   };
 
-  addMockFunctionToObject(realm, reactDomValue, reactDomRequireName, "createPortal", createPortalFunc);
+  addFunctionToObject(realm, reactDomValue, reactDomRequireName, "createPortal", createPortalFunc);
 
   reactDomValue.refuseSerialization = false;
   reactDomValue.makeFinal();
   return reactDomValue;
 }
 
-export function createMockReactDOMServer(realm: Realm, requireName: string): ObjectValue {
+export function createReactDOMServer(realm: Realm, requireName: string): ObjectValue {
   let reactDomServerValue = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
   reactDomServerValue.refuseSerialization = true;
 
@@ -81,20 +81,20 @@ export function createMockReactDOMServer(realm: Realm, requireName: string): Obj
     return reactDomMethod;
   };
 
-  addMockFunctionToObject(realm, reactDomServerValue, requireName, "renderToString", (funcVal, [input]) => {
+  addFunctionToObject(realm, reactDomServerValue, requireName, "renderToString", (funcVal, [input]) => {
     if (input instanceof ObjectValue && isReactElement(input)) {
       return renderToString(realm, input, false);
     }
     return genericTemporalFunc(funcVal, [input]);
   });
-  addMockFunctionToObject(realm, reactDomServerValue, requireName, "renderToStaticMarkup", (funcVal, [input]) => {
+  addFunctionToObject(realm, reactDomServerValue, requireName, "renderToStaticMarkup", (funcVal, [input]) => {
     if (input instanceof ObjectValue && isReactElement(input)) {
       return renderToString(realm, input, true);
     }
     return genericTemporalFunc(funcVal, [input]);
   });
-  addMockFunctionToObject(realm, reactDomServerValue, requireName, "renderToNodeStream", genericTemporalFunc);
-  addMockFunctionToObject(realm, reactDomServerValue, requireName, "renderToStaticNodeStream", genericTemporalFunc);
+  addFunctionToObject(realm, reactDomServerValue, requireName, "renderToNodeStream", genericTemporalFunc);
+  addFunctionToObject(realm, reactDomServerValue, requireName, "renderToStaticNodeStream", genericTemporalFunc);
 
   reactDomServerValue.refuseSerialization = false;
   reactDomServerValue.makeFinal();

@@ -63,7 +63,7 @@ import {
   withDescriptorValue,
 } from "./utils.js";
 import { createPathConditions, Environment, To } from "../singletons.js";
-import { isReactElement, isReactPropsObject, valueIsReactLibraryObject } from "../react/utils.js";
+import { isReactElement, isReactPropsObject } from "../react/utils.js";
 import { ResidualReactElementVisitor } from "./ResidualReactElementVisitor.js";
 import { GeneratorTree } from "./GeneratorTree.js";
 import { PropertyDescriptor, AbstractJoinedDescriptor } from "../descriptors.js";
@@ -914,9 +914,6 @@ export class ResidualHeapVisitor {
         return;
       default:
         if (kind !== "Object") this.logger.logError(val, `Object of kind ${kind} is not supported in residual heap.`);
-        if (this.realm.react.enabled && valueIsReactLibraryObject(this.realm, val, this.logger)) {
-          this.realm.fbLibraries.react = val;
-        }
         return;
     }
   }
