@@ -103,7 +103,7 @@ export class Serializer {
 
   _executeModuleEntry({ entryModulePath, entryModuleSource }: string, onParse?: BabelNodeFile => void): void {
     let realm = this.realm;
-    realm.moduleResolver.executeModule({ entryModulePath, entryModuleSource }, ast => {
+    realm.moduleResolver.executeModule("[Entry]", { entryModulePath, entryModuleSource }, ast => {
       let realmPreludeGenerator = realm.preludeGenerator;
       invariant(realmPreludeGenerator);
       let forbiddenNames = realmPreludeGenerator.nameGenerator.forbiddenNames;

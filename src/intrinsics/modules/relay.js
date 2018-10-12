@@ -143,8 +143,9 @@ export function createReactRelay(realm: Realm, relayRequireName: string): Object
   invariant(reactRelayFirstRenderFactory instanceof ECMAScriptSourceFunctionValue);
   let factory = reactRelayFirstRenderFactory.$Call;
   invariant(factory !== undefined);
-  invariant(realm.fbLibraries.react instanceof ObjectValue, "ReactRelay cannot be required before React");
-  let reactRelayFirstRenderValue = factory(realm.intrinsics.undefined, [realm.fbLibraries.react]);
+  let react = realm.moduleResolver.import("react");
+  invariant(react instanceof ObjectValue, "ReactRelay cannot be required before React");
+  let reactRelayFirstRenderValue = factory(realm.intrinsics.undefined, [react]);
   invariant(reactRelayFirstRenderValue instanceof ObjectValue);
 
   // we set refuseSerialization to true so we don't serialize the below properties straight away

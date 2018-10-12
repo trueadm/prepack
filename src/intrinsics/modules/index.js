@@ -11,7 +11,7 @@
 
 import { ObjectValue } from "../../values/index.js";
 import { createReact } from "./react.js";
-import { createReactDOM } from "./react-dom.js";
+import { createReactDOM, createReactDOMServer } from "./react-dom.js";
 import { createReactNative } from "./react-native.js";
 import { createReactRelay } from "./relay.js";
 import { Get } from "../../methods/index.js";
@@ -25,13 +25,16 @@ export default function(realm: Realm) {
     loadInternalReactDOM: (name: string) => {
       return createReactDOM(realm, name);
     },
+    loadInternalReactDOMServer: (name: string) => {
+      return createReactDOMServer(realm, name);
+    },
     loadInternalReactNative: (name: string) => {
       return createReactNative(realm, name);
     },
     loadInternalPropTypes: (name: string) => {
       let react = realm.moduleResolver.import("react");
       invariant(react instanceof ObjectValue);
-      let propTypes = Get(realm, realm.fbLibraries.react, "PropTypes");
+      let propTypes = Get(realm, react, "PropTypes");
       invariant(propTypes instanceof ObjectValue);
       return propTypes;
     },

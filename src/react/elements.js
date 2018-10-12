@@ -412,7 +412,7 @@ export function createReactElement(
 // Wraps a React element in a `<React.Fragment key={keyValue}>` so that we can
 // add a key without mutating or cloning the element.
 export function wrapReactElementWithKeyedFragment(realm: Realm, keyValue: Value, reactElement: Value): Value {
-  const react = realm.fbLibraries.react;
+  const react = realm.moduleResolver.import("react");
   invariant(react instanceof ObjectValue);
   const reactFragment = getProperty(realm, react, "Fragment");
   const fragmentConfigValue = Create.ObjectCreate(realm, realm.intrinsics.ObjectPrototype);

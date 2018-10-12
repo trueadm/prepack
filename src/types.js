@@ -82,6 +82,7 @@ export type InternalPrepackModules = {
   loadInternalReact: (name: string) => Value,
   loadInternalReactDOM: (name: string) => Value,
   loadInternalReactNative: (name: string) => Value,
+  loadInternalReactDOMServer: (name: string) => Value,
   loadInternalPropTypes: (name: string) => Value,
   loadInternalReactRelay: (name: string) => Value,
 };

@@ -21,15 +21,16 @@ import { LexicalEnvironment, ModuleEnvironmentRecord } from "./environment.js";
 import { PropertyDescriptor } from "./descriptors.js";
 
 export class ModuleResolver {
-  constructor(
-    realm: Realm,
-    resolveModuleNameFunc: () => string | Value | undefined,
-    internalModules: InternalPrepackModules
-  ) {
+  constructor(realm: Realm, internalModules: InternalPrepackModules) {
     this.realm = realm;
-    this.resolveModuleNameFunc = resolveModuleNameFunc;
+    this._transformsForEvent = new Map();
     this.internalModules = internalModules;
   }
+
+  realm: Realm;
+  resolveModuleNameFunc: void | (() => string | Value | undefined);
+  _transformsForEvent: Map<string, Array<(name: string, sourceOrValue: string | Value) => string | Value>>;
+  internalModules: InternalPrepackModules;
 
   _readModule(modulePath: string) {
     try {
@@ -49,15 +50,19 @@ export class ModuleResolver {
     return moduleEnvironment;
   }
 
-  executeModule({ entryModulePath, entryModuleSource }, onParse: void | (BabelNodeFile => void) = undefined): Value {
+  executeModule(
+    moduleName: string,
+    { entryModulePath, entryModuleSource },
+    onParse: void | (BabelNodeFile => void) = undefined
+  ): Value {
+    let moduleSource = entryModuleSource;
     if (entryModuleSource === undefined) {
       invariant(entryModulePath !== undefined);
-      entryModuleSource = this._readModule(entryModulePath);
+      moduleSource = this._readModule(entryModulePath);
     }
-    invariant(entryModulePath !== undefined);
-    let ast = this.realm.statistics.parsing.measure(() =>
-      parse(this.realm, entryModuleSource, entryModulePath, "module")
-    );
+    invariant(moduleSource !== undefined);
+    moduleSource = this._applyTransforms("module-source", moduleName, moduleSource);
+    let ast = this.realm.statistics.parsing.measure(() => parse(this.realm, moduleSource, entryModulePath, "module"));
     if (onParse) onParse(ast);
     let moduleEnvironment = this._createEnvironmentForModule(ast);
     let context = new ExecutionContext();
@@ -73,11 +78,38 @@ export class ModuleResolver {
       this.realm.popContext(context);
     }
     if (res instanceof AbruptCompletion) return;
-    return Environment.GetValue(this.realm, res);
+    let value = Environment.GetValue(this.realm, res);
+    value = this._applyTransforms("module-value", moduleName, value);
+    return value;
   }
 
-  import(moduleName: string) {
-    debugger;
+  import(moduleName: string): Value | string | symbol | void {
+    // Resolve the moduleName to a value or path
+    invariant(this.resolveModuleNameFunc !== undefined);
+    let resolveAtRuntime = Symbol.for("resolve module at runtime");
+    return this.resolveModuleNameFunc(moduleName, resolveAtRuntime, this.internalModules);
+  }
+
+  _applyTransforms(eventName: string, moduleName: string, originalInput: string | Value): string {
+    let output = originalInput;
+    let transformsFuncs = this._transformsForEvent.get(eventName);
+    for (let transformFunc of transformsFuncs) {
+      output = transformFunc(moduleName, output);
+      invariant(output !== undefined, "_applyTransforms failed");
+    }
+    return output;
+  }
+
+  addTransformListener(
+    eventName: string,
+    transformFunc: (name: string, sourceOrValue: string | Value) => string | Value
+  ): void {
+    let transformsFuncs = this._transformsForEvent.get(eventName);
+    if (transformsFuncs === undefined) {
+      transformsFuncs = [];
+      this._transformsForEvent.set(eventName, transformsFuncs);
+    }
+    transformsFuncs.push(transformFunc);
   }
 }
 
@@ -88,11 +120,15 @@ export function initializeModuleResolver(
 ): void {
   let resolveModuleNameFunc;
   let bagOfObjects = { ...Values, PropertyDescriptor };
+  let moduleResolver = (realm.moduleResolver = new ModuleResolver(realm, internalModules));
+  let transformModuleSource = func => moduleResolver.addTransformListener("module-source", func);
+  let transformModuleValue = func => moduleResolver.addTransformListener("module-value", func);
+  let bagOfTransforms = { transformModuleSource, transformModuleValue };
   try {
-    resolveModuleNameFunc = require(moduleResolverPath)(realm, bagOfObjects);
+    resolveModuleNameFunc = require(moduleResolverPath)(realm, bagOfTransforms, bagOfObjects);
   } catch (e) {
     // TODO handle error
   }
   invariant(typeof resolveModuleNameFunc === "function");
-  realm.moduleResolver = new ModuleResolver(realm, resolveModuleNameFunc, internalModules);
+  moduleResolver.resolveModuleNameFunc = resolveModuleNameFunc;
 }

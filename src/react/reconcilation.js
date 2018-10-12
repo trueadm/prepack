@@ -692,11 +692,12 @@ export class Reconciler {
     if (valueIsKnownReactAbstraction(this.realm, componentType)) {
       invariant(componentType instanceof AbstractValue);
       let reactHint = this.realm.react.abstractHints.get(componentType);
+      let reactRelay = this.realm.moduleResolver.import("react-relay");
 
       invariant(reactHint);
       if (
         typeof reactHint !== "string" &&
-        reactHint.object === this.realm.fbLibraries.reactRelay &&
+        reactHint.object === reactRelay &&
         this.componentTreeConfig.firstRenderOnly
       ) {
         return this._resolveRelayContainer(reactHint, props, context, branchStatus, evaluatedNode);
@@ -764,9 +765,10 @@ export class Reconciler {
   }
 
   _getComponentResolutionStrategy(value: Value): ComponentResolutionStrategy {
+    let reactRelay = this.realm.moduleResolver.import("react-relay");
     // check if it's a ReactRelay.QueryRenderer
-    if (this.realm.fbLibraries.reactRelay !== undefined) {
-      let QueryRenderer = getProperty(this.realm, this.realm.fbLibraries.reactRelay, "QueryRenderer");
+    if (reactRelay !== undefined) {
+      let QueryRenderer = getProperty(this.realm, reactRelay, "QueryRenderer");
       if (value === QueryRenderer) {
         return "RELAY_QUERY_RENDERER";
       }
@@ -810,7 +812,7 @@ export class Reconciler {
     evaluatedNode.children.push(evaluatedChildNode);
     if (resolvedReactPortalValue !== reactPortalValue) {
       this.statistics.inlinedComponents++;
-      let reactDomValue = this.realm.fbLibraries.reactDom;
+      let reactDomValue = this.realm.moduleResolver.import("react-dom");
       invariant(reactDomValue instanceof ObjectValue);
       let reactDomPortalFunc = getProperty(this.realm, reactDomValue, "createPortal");
       return AbstractValue.createTemporalFromBuildFunction(
@@ -921,7 +923,8 @@ export class Reconciler {
         let reactHint = this.realm.react.abstractHints.get(value);
 
         invariant(reactHint !== undefined);
-        if (reactHint.object === this.realm.fbLibraries.reactDom && reactHint.propertyName === "createPortal") {
+        let reactDom = this.realm.moduleResolver.import("react-relay");
+        if (reactHint.object === reactDom && reactHint.propertyName === "createPortal") {
           return this._resolveReactDomPortal(
             value,
             reactHint.args,

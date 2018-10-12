@@ -1691,11 +1691,8 @@ export function createReactNative(realm: Realm, reactNativeRequireName: string):
     RCTActivityIndicatorViewDerivedReference
   );
 
-  let reactLibrary = realm.fbLibraries.react;
-  invariant(
-    reactLibrary !== undefined,
-    "Could not find React library in sourcecode. Ensure React is bundled or required."
-  );
+  let reactLibrary = realm.moduleResolver.import("react");
+  invariant(reactLibrary !== undefined, "Could not find React. Ensure React is imported or required.");
   let reactNativeValue = factory(realm.intrinsics.undefined, [
     reactLibrary,
     new StringValue(realm, reactNativeRequireName),

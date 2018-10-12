@@ -564,7 +564,8 @@ export function getComponentTypeFromRootValue(
     let reactHint = realm.react.abstractHints.get(value);
 
     invariant(reactHint);
-    if (typeof reactHint !== "string" && reactHint.object === realm.fbLibraries.reactRelay) {
+    let reactRelay = realm.moduleResolver.import("react-relay");
+    if (typeof reactHint !== "string" && reactHint.object === reactRelay) {
       switch (reactHint.propertyName) {
         case "createFragmentContainer":
         case "createPaginationContainer":
@@ -779,8 +780,9 @@ export function getComponentName(realm: Realm, componentType: Value): string {
   if (componentType.__originalName) {
     return boundText + componentType.__originalName;
   }
-  if (realm.fbLibraries.reactRelay !== undefined) {
-    if (componentType === Get(realm, realm.fbLibraries.reactRelay, "QueryRenderer")) {
+  let reactRelay = realm.moduleResolver.import("react-relay");
+  if (reactRelay !== undefined) {
+    if (componentType === Get(realm, reactRelay, "QueryRenderer")) {
       return boundText + "QueryRenderer";
     }
   }

@@ -135,7 +135,7 @@ function setupReactTests() {
       invariantLevel: 0,
       stripFlow: true,
     };
-    const moduleResolverPath = __dirname + "/test/react/test-module-resolver.js";
+    const moduleResolverPath = __dirname + "/test-module-resolver.js";
     const serialized = prepackModules({ entryModuleSource, moduleResolverPath }, prepackOptions);
     if (serialized == null || serialized.reactStatistics == null) {
       throw new Error("React test runner failed during serialization");

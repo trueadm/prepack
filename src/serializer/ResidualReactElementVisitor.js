@@ -209,7 +209,7 @@ export class ResidualReactElementVisitor {
   }
 
   _getReactLibraryValue() {
-    const reactLibraryObject = this.realm.fbLibraries.react;
+    const reactLibraryObject = this.realm.moduleResolver.import("react");
     invariant(reactLibraryObject, "Unable to find React library reference in scope.");
     return reactLibraryObject;
   }

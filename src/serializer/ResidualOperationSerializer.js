@@ -282,6 +282,9 @@ export class ResidualOperationSerializer {
       case "MODULES_REQUIRE":
         babelNode = this._serializeModulesRequires(data, nodes);
         break;
+      case "MODULE_EXPORTS_ASSIGNMENT":
+        babelNode = this._serializeModulesExportsAssignment(data, nodes);
+        break;
       case "RESIDUAL_CALL":
         babelNode = this._serializeResidualCall(data, nodes);
         break;
@@ -989,6 +992,12 @@ export class ResidualOperationSerializer {
       value.mightHaveBeenDeleted(),
       /* deleteIfMightHaveBeenDeleted */ true
     );
+  }
+  _serializeModulesExportsAssignment(
+    {  }: OperationDescriptorData,
+    [valueNode]: Array<BabelNodeExpression>
+  ): BabelNodeExpression {
+    return t.assignmentExpression("=", t.memberExpression(t.identifier("module"), t.identifier("exports")), valueNode);
   }
 
   _serializeGlobalAssignment(

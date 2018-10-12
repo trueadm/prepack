@@ -103,6 +103,7 @@ export type OperationDescriptorType =
   | "LOCAL_ASSIGNMENT"
   | "LOGICAL_EXPRESSION"
   | "LOGICAL_PROPERTY_ASSIGNMENT"
+  | "MODULE_EXPORTS_ASSIGNMENT"
   | "MODULES_REQUIRE"
   | "NEW_EXPRESSION"
   | "NOOP"
@@ -837,6 +838,13 @@ export class Generator {
     this._addEntry({
       args: [value, new StringValue(this.realm, key)],
       operationDescriptor: createOperationDescriptor("GLOBAL_ASSIGNMENT"),
+    });
+  }
+
+  emitModuleExportsAssignment(value: Value): void {
+    this._addEntry({
+      args: [value],
+      operationDescriptor: createOperationDescriptor("MODULE_EXPORTS_ASSIGNMENT"),
     });
   }
 
