@@ -108,6 +108,9 @@ function evaluateJSXMemberExpression(
         realm,
         env.evaluate(convertJSXExpressionToIdentifier(((ast: any): BabelNodeJSXMemberExpression)), strictCode)
       );
+    case "JSXNamespacedName":
+      // TODO this is a temporary workaround to get internal bundles to compile
+      return new StringValue(realm, ast.namespace.name + ":" + ast.name.name);
     default:
       invariant(false, "Unknown JSX Identifier");
   }
