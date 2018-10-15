@@ -589,6 +589,7 @@ export class LeakImplementation {
       //   that external/abstract functions are pure with regards to heap objects
       return;
     }
+    return;
     let objectsTrackedForLeaks = realm.createdObjectsTrackedForLeaks;
     if (objectsTrackedForLeaks === undefined) {
       // We're not tracking a pure function. That means that we would track

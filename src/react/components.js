@@ -219,7 +219,14 @@ export function createClassInstanceForFirstRenderOnly(
   context: ObjectValue | AbstractValue,
   evaluatedNode: ReactEvaluatedNode
 ): ObjectValue {
-  let instance = getValueFromFunctionCall(realm, componentType, realm.intrinsics.undefined, [props, context], true);
+  let instance = getValueFromFunctionCall(
+    realm,
+    componentType,
+    realm.intrinsics.undefined,
+    [props, context],
+    false,
+    true
+  );
   let objectAssign = Get(realm, realm.intrinsics.Object, "assign");
   invariant(objectAssign instanceof ECMAScriptFunctionValue);
   let objectAssignCall = objectAssign.$Call;
@@ -246,7 +253,7 @@ export function createClassInstanceForFirstRenderOnly(
     }
     if (stateToUpdate instanceof ObjectValue) {
       let newState = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
-      objectAssignCall(realm.intrinsics.undefined, [newState, prevState]);
+      objectAssignCall(realm.intrinsics.undefined, [newState, prevState], true);
       newState.makeFinal();
 
       for (let [key, binding] of stateToUpdate.properties) {
@@ -262,7 +269,7 @@ export function createClassInstanceForFirstRenderOnly(
       Properties.Set(realm, instance, "state", newState, true);
     }
     if (callback instanceof ECMAScriptSourceFunctionValue && callback.$Call) {
-      callback.$Call(instance, []);
+      callback.$Call(instance, [], true);
     }
     return realm.intrinsics.undefined;
   });
@@ -414,7 +421,7 @@ export function applyGetDerivedStateFromProps(
     } else if (state !== realm.intrinsics.null && state !== realm.intrinsics.undefined) {
       let newState = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
       try {
-        objectAssignCall(realm.intrinsics.undefined, [newState, prevState, state]);
+        objectAssignCall(realm.intrinsics.undefined, [newState, prevState, state], true);
       } catch (e) {
         if (realm.isInPureScope() && e instanceof FatalError) {
           let preludeGenerator = realm.preludeGenerator;

@@ -308,6 +308,8 @@ export class Realm {
       enabled: opts.instantRender || false,
     };
 
+    this.outlineInternalFunctionCalls = false;
+
     this.react = {
       abstractHints: new WeakMap(),
       activeReconciler: undefined,

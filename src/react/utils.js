@@ -905,6 +905,7 @@ export function getValueFromFunctionCall(
   func: ECMAScriptSourceFunctionValue | BoundFunctionValue,
   funcThis: ObjectValue | AbstractObjectValue | UndefinedValue,
   args: Array<Value>,
+  outlineFunctionCall: boolean,
   isConstructor?: boolean = false
 ): Value {
   invariant(func.$Call, "Expected function to be a FunctionValue with $Call method");
@@ -917,7 +918,10 @@ export function getValueFromFunctionCall(
       invariant(newCall);
       value = newCall(args, func);
     } else {
-      value = funcCall(funcThis, args);
+      if (outlineFunctionCall) {
+        realm.outlineInternalFunctionCalls = true;
+      }
+      value = funcCall(funcThis, args, true);
     }
     completion = new SimpleNormalCompletion(value);
   } catch (error) {
@@ -925,6 +929,10 @@ export function getValueFromFunctionCall(
       completion = error;
     } else {
       throw error;
+    }
+  } finally {
+    if (outlineFunctionCall) {
+      realm.outlineInternalFunctionCalls = false;
     }
   }
   return realm.returnOrThrowCompletion(completion);

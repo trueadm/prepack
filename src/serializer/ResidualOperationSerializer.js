@@ -222,6 +222,9 @@ export class ResidualOperationSerializer {
       case "CALL_BAILOUT":
         babelNode = this._serializeCallBailout(data, nodes);
         break;
+      case "OUTLINE_FUNCTION_CALL":
+        babelNode = this._serializeOulinteFunctionCall(data, nodes);
+        break;
       case "EMIT_CALL_AND_CAPTURE_RESULT":
         babelNode = this._serializeEmitCallAndCaptureResults(data, nodes);
         break;
@@ -957,6 +960,13 @@ export class ResidualOperationSerializer {
     }
     let fun_args = ((nodes.slice(argStart): any): Array<BabelNodeExpression | BabelNodeSpreadElement>);
     return t.callExpression(callFunc, fun_args);
+  }
+
+  _serializeOulinteFunctionCall(
+    {  }: OperationDescriptorData,
+    [callFunc, ...funArgs]: Array<BabelNodeExpression>
+  ): BabelNodeExpression {
+    return t.callExpression(callFunc, ((funArgs: any): Array<BabelNodeExpression | BabelNodeSpreadElement>));
   }
 
   _serializeJoinGenerators(
