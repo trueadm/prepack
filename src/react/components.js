@@ -239,10 +239,7 @@ export function createClassInstanceForFirstRenderOnly(
   // assign context
   Properties.Set(realm, instance, "context", context, true);
   let state = Get(realm, instance, "state");
-  if (
-    (state instanceof AbstractObjectValue && state.kind !== "outlined function marker") ||
-    state instanceof ObjectValue
-  ) {
+  if (state instanceof AbstractObjectValue || state instanceof ObjectValue) {
     state.makeFinal();
   }
   // assign a mocked setState

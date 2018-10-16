@@ -45,12 +45,18 @@ export class CompilerDiagnostic extends Error {
   sourceFilePaths: void | { sourceMaps: Array<string>, sourceFiles: Array<{ absolute: string, relative: string }> };
 }
 
+
+var x = 0;
 // This error is thrown to exit Prepack when an ErrorHandler returns 'FatalError'
 // This should just be a class but Babel classes doesn't work with
 // built-in super classes.
 export class FatalError extends Error {
   constructor(message?: string) {
     super(message === undefined ? "A fatal error occurred while prepacking." : message);
+    this.x = x++;
+    // if (this.x === 2536) {
+    //   debugger;
+    // }
   }
 }
 

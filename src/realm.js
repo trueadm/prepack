@@ -309,7 +309,7 @@ export class Realm {
     };
 
     this.functionsToOutline = new Set();
-    this.outlinedFunctionMarkers = new Map();
+    this.outlinedFunctionValues = new Map();
 
     this.react = {
       abstractHints: new WeakMap(),

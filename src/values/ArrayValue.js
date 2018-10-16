@@ -101,7 +101,6 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
       }
       throw e;
     }
-
     // Check if effects were pure then add them
     if (abstractArrayValue.nestedOptimizedFunctionEffects === undefined) {
       abstractArrayValue.nestedOptimizedFunctionEffects = new Map();

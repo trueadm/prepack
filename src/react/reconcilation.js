@@ -78,7 +78,6 @@ import type { ClassComponentMetadata, ReactComponentTreeConfig, ReactHint } from
 import { handleReportedSideEffect } from "../serializer/utils.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { PropertyDescriptor } from "../descriptors.js";
-import { getModeledValueFromOutlinedFunctionMaker } from "./outlining.js";
 
 type ComponentResolutionStrategy =
   | "NORMAL"
@@ -915,10 +914,7 @@ export class Reconciler {
     evaluatedNode: ReactEvaluatedNode
   ): Value {
     invariant(this.realm.generator);
-    if (value.kind === "outlined function marker") {
-      let modeledValue = getModeledValueFromOutlinedFunctionMaker(this.realm, value);
-      return this._resolveDeeply(componentType, modeledValue, context, branchStatus, evaluatedNode, false);
-    } else if (value.kind === "conditional") {
+    if (value.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = value.args;
       invariant(condValue instanceof AbstractValue);
       return this._resolveAbstractConditionalValue(

@@ -18,8 +18,9 @@ import {
   ECMAScriptFunctionValue,
   ECMAScriptSourceFunctionValue,
   FunctionValue,
-  PrimitiveValue,
   ObjectValue,
+  PrimitiveValue,
+  StringValue,
   Value,
 } from "../values/index.js";
 import invariant from "../invariant.js";
@@ -27,6 +28,7 @@ import { AbruptCompletion, JoinedNormalAndAbruptCompletions, SimpleNormalComplet
 import { PropertyDescriptor, cloneDescriptor } from "../descriptors.js";
 import { Get } from "../methods/index.js";
 import { Properties, Utils } from "../singletons.js";
+import { createOperationDescriptor } from "../utils/generator.js";
 
 function getOutliningValuesFromConcreteValue(
   realm: Realm,
@@ -58,15 +60,29 @@ function getOutliningValuesFromConcreteValue(
         getOutliningValues(realm, propVal, funcEffects, knownValues, clonableValues, unknownValues);
       }
     }
+    let unknownProperty = val.unknownProperty;
+    if (unknownProperty !== undefined) {
+      if (unknownProperty.key instanceof Value) {
+        getOutliningValues(realm, unknownProperty.key, funcEffects, knownValues, clonableValues, unknownValues);
+      }
+      let descriptor = unknownProperty.descriptor;
+      if (descriptor !== undefined && descriptor.value instanceof Value) {
+        getOutliningValues(realm, descriptor.value, funcEffects, knownValues, clonableValues, unknownValues);
+      }
+    }
     if (val instanceof ArrayValue) {
       invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
       clonableValues.add(val);
+      if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+        unknownValues.add(val);
+      }
     } else if (val instanceof FunctionValue) {
       invariant(val.$Prototype === realm.intrinsics.FunctionPrototype);
       // we don't handle unknown values just yet
       unknownValues.add(val);
+    } else if (val.$Prototype !== realm.intrinsics.ObjectPrototype) {
+      unknownValues.add(val);
     } else {
-      invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
       clonableValues.add(val);
     }
   }
@@ -89,7 +105,8 @@ function getOutliningValuesFromAbstractValue(
     unknownValues.add(val);
     return;
   }
-  if (val.kind === "conditional") {
+  const kind = val.kind;
+  if (kind === "conditional") {
     clonableValues.add(val);
     let [condValue, consequentVal, alternateVal] = val.args;
     getOutliningValues(realm, condValue, funcEffects, knownValues, clonableValues, unknownValues, true);
@@ -100,6 +117,12 @@ function getOutliningValuesFromAbstractValue(
     for (let arg of val.args) {
       getOutliningValues(realm, arg, funcEffects, knownValues, clonableValues, unknownValues);
     }
+  } else if (kind === "widened numeric property") {
+    clonableValues.add(val);
+  } else if (kind !== undefined && kind.startsWith("property:")) {
+    clonableValues.add(val);
+  } else if (kind !== undefined && kind.startsWith("template:")) {
+    clonableValues.add(val);
   } else {
     unknownValues.add(val);
   }
@@ -114,6 +137,9 @@ function getOutliningValues(
   unknownValues: Set<Value>,
   noCloningAbstracts?: boolean
 ): void {
+  if (val.x === 184733) {
+    debugger;
+  }
   if (val instanceof ConcreteValue) {
     return getOutliningValuesFromConcreteValue(realm, val, funcEffects, knownValues, clonableValues, unknownValues);
   } else if (val instanceof AbstractValue) {
@@ -181,8 +207,9 @@ export function possiblyOutlineFunctionCall(
   };
   let usesThis = thisArgument !== realm.intrinsics.undefined;
   let isPrimitive = result instanceof PrimitiveValue;
+  let generator = effects.generator;
 
-  if (isPrimitive || !Utils.areEffectsPure(realm, effects, F)) {
+  if (usesThis || isPrimitive || !Utils.areEffectsPure(realm, effects, F) || generator._entries.length === 0) {
     return inlineFunctionCall();
   }
   let knownValues = new Set();
@@ -193,14 +220,15 @@ export function possiblyOutlineFunctionCall(
     return realm.intrinsics.undefined;
   }, effects);
   modelAndOptimizeOutlinedFunction(realm, F, thisArgument);
-  return AbstractValue.createOutlinedFunctionMarker(
+  let marker = AbstractValue.createOutlinedFunctionMarker(realm, F, argsList, effects);
+  return createModeledValueFromValue(
     realm,
-    F,
-    argsList,
+    result,
+    marker.intrinsicName,
+    effects,
     knownValues,
     clonableValues,
-    unknownValues,
-    effects
+    unknownValues
   );
 }
 
@@ -226,12 +254,11 @@ function cloneAndModelObjectPropertyDescriptor(
   realm: Realm,
   object: ObjectValue,
   clonedObject: ObjectValue,
-  propName: string,
   desc: PropertyDescriptor,
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
-  unknownValues: Map<Value, string>
+  unknownValueNameMap: Map<Value, string>
 ): PropertyDescriptor {
   let clonedDesc = cloneDescriptor(desc);
   invariant(clonedDesc !== undefined);
@@ -240,7 +267,7 @@ function cloneAndModelObjectPropertyDescriptor(
     if (value === object) {
       value = clonedObject;
     }
-    let clonedValue = cloneAndModelValue(realm, value, funcEffects, knownValues, clonableValues, unknownValues);
+    let clonedValue = cloneAndModelValue(realm, value, funcEffects, knownValues, clonableValues, unknownValueNameMap);
     clonedDesc.value = clonedValue;
   } else {
     invariant(false, "// TODO handle get/set in cloneAndModelObjectPropertyDescriptor");
@@ -255,9 +282,10 @@ function cloneObjectProperties(
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
-  unknownValues: Map<Value, string>
+  unknownValueNameMap: Map<Value, string>
 ): void {
   clonedObject.refuseSerialization = true;
+  // TODO do symbols
   for (let [propName, { descriptor }] of val.properties) {
     // TODO support prototypes and callee
     if (propName === "prototype" || propName === "callee") {
@@ -268,14 +296,45 @@ function cloneObjectProperties(
       realm,
       val,
       clonedObject,
-      propName,
       descriptor,
       funcEffects,
       knownValues,
       clonableValues,
-      unknownValues
+      unknownValueNameMap
     );
     Properties.OrdinaryDefineOwnProperty(realm, clonedObject, propName, desc);
+  }
+  let unknownProperty = val.unknownProperty;
+  if (unknownProperty !== undefined) {
+    let desc;
+    let key;
+    if (unknownProperty.descriptor !== undefined) {
+      desc = cloneAndModelObjectPropertyDescriptor(
+        realm,
+        val,
+        clonedObject,
+        unknownProperty.descriptor,
+        funcEffects,
+        knownValues,
+        clonableValues,
+        unknownValueNameMap
+      );
+    }
+    if (unknownProperty.key !== undefined) {
+      key = cloneAndModelValue(
+        realm,
+        unknownProperty.key,
+        funcEffects,
+        knownValues,
+        clonableValues,
+        unknownValueNameMap
+      );
+    }
+    clonedObject.unknownProperty = {
+      descriptor: desc,
+      key,
+      object: clonedObject,
+    };
   }
   clonedObject.refuseSerialization = false;
 }
@@ -286,30 +345,40 @@ function cloneAndModelObjectValue(
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
-  unknownValues: Map<Value, string>
+  unknownValueNameMap: Map<Value, string>
 ): ObjectValue {
   if (knownValues.has(val)) {
     return val;
   }
+  if (unknownValueNameMap.has(val)) {
+    let intrinsicName = unknownValueNameMap.get(val);
+    let clonedAbstractValue = AbstractValue.createFromType(realm, val.getType(), "outlined abstract intrinsic", []);
+    clonedAbstractValue.intrinsicName = intrinsicName;
+    return clonedAbstractValue;
+  }
   if (val instanceof ArrayValue) {
     invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
+    invariant(clonableValues.has(val));
     let clonedObject = new ArrayValue(realm);
-    cloneObjectProperties(realm, clonedObject, val, funcEffects, knownValues, clonableValues, unknownValues);
+    cloneObjectProperties(realm, clonedObject, val, funcEffects, knownValues, clonableValues, unknownValueNameMap);
     applyPostValueConfig(realm, val, clonedObject);
+    if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+      if (val.nestedOptimizedFunctionEffects !== undefined) {
+        debugger;
+      }
+      clonedObject.intrinsicName = unknownValueNameMap.get(val);
+      clonedObject.isScopedTemplate = true;
+      clonedObject.intrinsicNameGenerated = true;
+    }
     return clonedObject;
   } else if (val instanceof FunctionValue) {
     invariant(val.$Prototype === realm.intrinsics.FunctionPrototype);
-    if (unknownValues.has(val)) {
-      let intrinsicName = unknownValues.get(val);
-      let clonedAbstractValue = AbstractValue.createFromType(realm, val.getType(), "outlined abstract intrinsic", []);
-      clonedAbstractValue.intrinsicName = intrinsicName;
-      return clonedAbstractValue;
-    }
+    invariant(false, "We should never get here!");
   }
   invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
   invariant(clonableValues.has(val));
   let clonedObject = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
-  cloneObjectProperties(realm, clonedObject, val, funcEffects, knownValues, clonableValues, unknownValues);
+  cloneObjectProperties(realm, clonedObject, val, funcEffects, knownValues, clonableValues, unknownValueNameMap);
   applyPostValueConfig(realm, val, clonedObject);
   return clonedObject;
 }
@@ -320,17 +389,14 @@ function cloneAndModelAbstractValue(
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
-  unknownValues: Map<Value, string>
+  unknownValueNameMap: Map<Value, string>
 ): ObjectValue {
   if (knownValues.has(val)) {
     return val;
   }
   const kind = val.kind;
-  if (kind === "outlined function marker") {
-    return getModeledValueFromOutlinedFunctionMaker(realm, val, unknownValues);
-  }
-  if (unknownValues.has(val)) {
-    let intrinsicName = unknownValues.get(val);
+  if (unknownValueNameMap.has(val)) {
+    let intrinsicName = unknownValueNameMap.get(val);
     let clonedAbstractValue = AbstractValue.createFromType(realm, val.getType(), "outlined abstract intrinsic", []);
     clonedAbstractValue.intrinsicName = intrinsicName;
     return clonedAbstractValue;
@@ -339,14 +405,21 @@ function cloneAndModelAbstractValue(
     invariant(clonableValues.has(val));
     // Conditional ops
     let [condValue, consequentVal, alternateVal] = val.args;
-    let clonedCondValue = cloneAndModelValue(realm, condValue, funcEffects, knownValues, clonableValues, unknownValues);
+    let clonedCondValue = cloneAndModelValue(
+      realm,
+      condValue,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValueNameMap
+    );
     let clonedConsequentVal = cloneAndModelValue(
       realm,
       consequentVal,
       funcEffects,
       knownValues,
       clonableValues,
-      unknownValues
+      unknownValueNameMap
     );
     let clonedAlternateVal = cloneAndModelValue(
       realm,
@@ -354,21 +427,28 @@ function cloneAndModelAbstractValue(
       funcEffects,
       knownValues,
       clonableValues,
-      unknownValues
+      unknownValueNameMap
     );
     return AbstractValue.createFromConditionalOp(realm, clonedCondValue, clonedConsequentVal, clonedAlternateVal);
   } else if (kind === "&&" || kind === "||") {
     invariant(clonableValues.has(val));
     // Logical ops
     let [leftValue, rightValue] = val.args;
-    let clonedLeftValue = cloneAndModelValue(realm, leftValue, funcEffects, knownValues, clonableValues, unknownValues);
+    let clonedLeftValue = cloneAndModelValue(
+      realm,
+      leftValue,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValueNameMap
+    );
     let clonedRightValue = cloneAndModelValue(
       realm,
       rightValue,
       funcEffects,
       knownValues,
       clonableValues,
-      unknownValues
+      unknownValueNameMap
     );
     return AbstractValue.createFromLogicalOp(realm, kind, clonedLeftValue, clonedRightValue);
   } else if (
@@ -398,14 +478,21 @@ function cloneAndModelAbstractValue(
     invariant(clonableValues.has(val));
     // Binary ops
     let [leftValue, rightValue] = val.args;
-    let clonedLeftValue = cloneAndModelValue(realm, leftValue, funcEffects, knownValues, clonableValues, unknownValues);
+    let clonedLeftValue = cloneAndModelValue(
+      realm,
+      leftValue,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValueNameMap
+    );
     let clonedRightValue = cloneAndModelValue(
       realm,
       rightValue,
       funcEffects,
       knownValues,
       clonableValues,
-      unknownValues
+      unknownValueNameMap
     );
     return AbstractValue.createFromBinaryOp(realm, kind, clonedLeftValue, clonedRightValue);
   } else if (
@@ -420,11 +507,39 @@ function cloneAndModelAbstractValue(
     invariant(clonableValues.has(val));
     // Unary ops
     let [condValue] = val.args;
-    let clonedCondValue = cloneAndModelValue(realm, condValue, funcEffects, knownValues, clonableValues, unknownValues);
+    let clonedCondValue = cloneAndModelValue(
+      realm,
+      condValue,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValueNameMap
+    );
     invariant(val.operationDescriptor !== undefined);
     invariant(clonedCondValue instanceof AbstractValue);
     let hasPrefix = val.operationDescriptor.data.prefix;
     return AbstractValue.createFromUnaryOp(realm, kind, clonedCondValue, hasPrefix);
+  } else if (kind === "widened numeric property") {
+    return AbstractValue.createFromType(realm, Value, "widened numeric property", [...val.args]);
+  } else if (kind !== undefined && kind.startsWith("property:")) {
+    let clonedArgs = val.args.map(arg =>
+      cloneAndModelValue(realm, arg, funcEffects, knownValues, clonableValues, unknownValueNameMap)
+    );
+    let P = clonedArgs[1];
+    invariant(P instanceof StringValue);
+    return AbstractValue.createFromBuildFunction(
+      realm,
+      val.getType(),
+      clonedArgs,
+      createOperationDescriptor("ABSTRACT_PROPERTY"),
+      { kind: AbstractValue.makeKind("property", P.value) }
+    );
+  } else if (kind !== undefined && kind.startsWith("template:")) {
+    let source = kind.replace("template:", "");
+    let clonedArgs = val.args.map(arg =>
+      cloneAndModelValue(realm, arg, funcEffects, knownValues, clonableValues, unknownValueNameMap)
+    );
+    return AbstractValue.createFromTemplate(realm, source, val.getType(), clonedArgs);
   }
 
   debugger;
@@ -436,29 +551,32 @@ function cloneAndModelValue(
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
-  unknownValues: Map<Value, string>
+  unknownValueNameMap: Map<Value, string>
 ): Value {
+  if (realm.outlinedFunctionValues.has(val)) {
+    debugger;
+  }
   if (val instanceof ConcreteValue) {
     if (val instanceof PrimitiveValue) {
       return val;
     } else if (val instanceof ObjectValue) {
-      return cloneAndModelObjectValue(realm, val, funcEffects, knownValues, clonableValues, unknownValues);
+      return cloneAndModelObjectValue(realm, val, funcEffects, knownValues, clonableValues, unknownValueNameMap);
     }
   } else if (val instanceof AbstractValue) {
-    return cloneAndModelAbstractValue(realm, val, funcEffects, knownValues, clonableValues, unknownValues);
+    return cloneAndModelAbstractValue(realm, val, funcEffects, knownValues, clonableValues, unknownValueNameMap);
   }
   invariant(false, "cloneValue was passed an unknown type of cloneValue");
 }
 
-export function getModeledValueFromOutlinedFunctionMaker(
+function createModeledValueFromValue(
   realm: Realm,
-  marker: AbstractValue,
-  unknownValuesMap?: Map<Value, String>
+  value: Value,
+  intrinsicName: string,
+  effects: Effects,
+  knownValues: Set<Value>,
+  clonableValues: Set<Value>,
+  unknownValues: Set<Value>
 ): Value {
-  invariant(marker.kind === "outlined function marker");
-  let markerProperties = realm.outlinedFunctionMarkers.get(marker);
-  invariant(markerProperties !== undefined);
-  let { effects, knownValues, clonableValues, unknownValues } = markerProperties;
   let cloneAndModeledValue;
   let clonedEffects;
 
@@ -468,19 +586,11 @@ export function getModeledValueFromOutlinedFunctionMaker(
       result = result.value;
     }
     invariant(result instanceof Value);
-    let newUnknownValuesMap;
-    let intrinsicName;
+    let unknownValueNameMap = new Map();
 
-    if (unknownValuesMap !== undefined) {
-      intrinsicName = unknownValuesMap.get(marker);
-      newUnknownValuesMap = new Map(unknownValuesMap);
-    } else {
-      intrinsicName = marker.intrinsicName;
-      newUnknownValuesMap = new Map();
-    }
     let i = 0;
-    for (let value of unknownValues) {
-      newUnknownValuesMap.set(value, `${intrinsicName}[${i++}]`);
+    for (let unknownValue of unknownValues) {
+      unknownValueNameMap.set(unknownValue, `${intrinsicName}[${i++}]`);
     }
     clonedEffects = realm.evaluateForEffects(
       () => {
@@ -490,7 +600,47 @@ export function getModeledValueFromOutlinedFunctionMaker(
           effects,
           knownValues,
           clonableValues,
-          newUnknownValuesMap
+          unknownValueNameMap
+        );
+        return realm.intrinsics.undefined;
+      },
+      undefined,
+      "createAbstractTemporalValue"
+    );
+    return realm.intrinsics.undefined;
+  }, effects);
+  realm.applyEffects(clonedEffects);
+  realm.outlinedFunctionValues.set(value, { effects, knownValues, clonableValues, unknownValues });
+  return cloneAndModeledValue;
+}
+
+function getModeledValueFromValue(realm: Realm, value: Value, unknownValuesMap: Map<Value, String>): Value {
+  let { effects, knownValues, clonableValues, unknownValues } = realm.outlinedFunctionValues.get(value);
+  let cloneAndModeledValue;
+  let clonedEffects;
+
+  realm.withEffectsAppliedInGlobalEnv(() => {
+    let result = effects.result;
+    if (result instanceof SimpleNormalCompletion) {
+      result = result.value;
+    }
+    invariant(result instanceof Value);
+    let unknownValueNameMap = new Map(unknownValuesMap);
+    let intrinsicName = unknownValuesMap.get(value);
+
+    let i = 0;
+    for (let unknownValue of unknownValues) {
+      unknownValueNameMap.set(unknownValue, `${intrinsicName}[${i++}]`);
+    }
+    clonedEffects = realm.evaluateForEffects(
+      () => {
+        cloneAndModeledValue = cloneAndModelValue(
+          realm,
+          result,
+          effects,
+          knownValues,
+          clonableValues,
+          unknownValueNameMap
         );
         return realm.intrinsics.undefined;
       },

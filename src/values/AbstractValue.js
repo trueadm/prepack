@@ -1165,9 +1165,6 @@ export default class AbstractValue extends Value {
     realm: Realm,
     F: ECMAScriptFunctionValue,
     argsList: Array<Value>,
-    knownValues: Set<Value>,
-    clonableValues: Set<Value>,
-    unknownValues: Set<Value>,
     effects: Effects
   ): AbstractValue {
     let result = effects.result;
@@ -1175,20 +1172,12 @@ export default class AbstractValue extends Value {
       result = result.value;
     }
     invariant(result instanceof Value);
-    let marker = AbstractValue.createTemporalFromBuildFunction(
+    return AbstractValue.createTemporalFromBuildFunction(
       realm,
       result.getType(),
       [F, ...argsList],
       createOperationDescriptor("OUTLINE_FUNCTION_CALL"),
       { skipInvariant: true }
     );
-    marker.kind = "outlined function marker";
-    realm.outlinedFunctionMarkers.set(marker, {
-      knownValues,
-      clonableValues,
-      unknownValues,
-      effects,
-    });
-    return marker;
   }
 }

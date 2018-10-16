@@ -127,6 +127,7 @@ function materializeObject(realm: Realm, object: ObjectValue, getCachingHeapInsp
   let getHeapInspector =
     getCachingHeapInspector || (() => new HeapInspector(realm, new Logger(realm, /*internalDebug*/ false)));
 
+  return;
   // TODO: We should emit current value and then reset value for all *internal slots*; this will require deep serializer support; or throw FatalError when we detect any non-initial values in internal slots.
   for (let [name, propertyBinding] of object.properties) {
     // ignore properties with their correct default values

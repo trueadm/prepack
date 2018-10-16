@@ -1102,6 +1102,9 @@ export class Generator {
       options
     );
     res.intrinsicName = id;
+    // if (id === "_$OR") {
+    //   debugger;
+    // }
     this._addDerivedEntry({
       isPure: optionalArgs ? optionalArgs.isPure : undefined,
       declared: res,
