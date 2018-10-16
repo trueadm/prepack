@@ -930,10 +930,6 @@ export function getValueFromFunctionCall(
     } else {
       throw error;
     }
-  } finally {
-    if (outlineFunctionCall) {
-      realm.outlineInternalFunctionCalls = false;
-    }
   }
   return realm.returnOrThrowCompletion(completion);
 }

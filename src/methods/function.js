@@ -923,6 +923,7 @@ export class FunctionImplementation {
     if (F instanceof NativeFunctionValue || !realm.outlineInternalFunctionCalls) {
       return InternalCall(realm, F, thisArgument, argsList, 0);
     }
+    // realm.outlineInternalFunctionCalls = false;
     return PossiblyOutlineInternalFunctionCall(realm, F, thisArgument, argsList);
   }
 

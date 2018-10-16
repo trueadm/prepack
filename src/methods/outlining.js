@@ -51,6 +51,11 @@ export function PossiblyOutlineInternalFunctionCall(
   if (functionContainedOptimizeCalls || isPrimitive || usesThis || !Utils.areEffectsPure(realm, effects, F)) {
     return inlineFunctionCall();
   }
+  let body = F.$ECMAScriptCode.body;
+  if (body.length < 4) {
+    return inlineFunctionCall();
+  }
+  debugger;
   return AbstractValue.createTemporalFromBuildFunction(
     realm,
     result.getType(),
