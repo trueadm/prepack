@@ -78,6 +78,7 @@ import type { ClassComponentMetadata, ReactComponentTreeConfig, ReactHint } from
 import { handleReportedSideEffect } from "../serializer/utils.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { PropertyDescriptor } from "../descriptors.js";
+import { getModeledValueFromOutlinedFunctionMaker } from "./outlining.js";
 
 type ComponentResolutionStrategy =
   | "NORMAL"
@@ -226,6 +227,7 @@ export class Reconciler {
     if (rootValue instanceof SymbolValue) {
       return;
     }
+    debugger;
     invariant(rootValue instanceof ECMAScriptSourceFunctionValue || rootValue instanceof AbstractValue);
     this.componentTreeState.deadEnds++;
     let componentType = getComponentTypeFromRootValue(this.realm, rootValue);
@@ -913,8 +915,10 @@ export class Reconciler {
     evaluatedNode: ReactEvaluatedNode
   ): Value {
     invariant(this.realm.generator);
-    // TODO investigate what other kinds than "conditional" might be safe to deeply resolve
-    if (value.kind === "conditional") {
+    if (value.kind === "outlined function marker") {
+      let modeledValue = getModeledValueFromOutlinedFunctionMaker(this.realm, value);
+      return this._resolveDeeply(componentType, modeledValue, context, branchStatus, evaluatedNode, false);
+    } else if (value.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = value.args;
       invariant(condValue instanceof AbstractValue);
       return this._resolveAbstractConditionalValue(
@@ -1409,7 +1413,7 @@ export class Reconciler {
       let nestedOptimizedFunctionEffects = arrayValue.nestedOptimizedFunctionEffects;
 
       if (nestedOptimizedFunctionEffects !== undefined) {
-        for (let [func, effects] of nestedOptimizedFunctionEffects) {
+        for (let [func, { effects, thisValue }] of nestedOptimizedFunctionEffects) {
           let funcCall = () => {
             let result = effects.result;
             this.realm.applyEffects(effects);
@@ -1431,8 +1435,8 @@ export class Reconciler {
               handleReportedSideEffect(throwUnsupportedSideEffectError, sideEffectType, binding, expressionLocation)
           );
           this.statistics.optimizedNestedClosures++;
-          nestedOptimizedFunctionEffects.set(func, resolvedEffects);
-          this.realm.collectedNestedOptimizedFunctionEffects.set(func, resolvedEffects);
+          nestedOptimizedFunctionEffects.set(func, { effects: resolvedEffects, thisValue });
+          this.realm.collectedNestedOptimizedFunctionEffects.set(func, { effects: resolvedEffects, thisValue });
         }
       }
       return arrayValue;
@@ -1561,6 +1565,6 @@ export class Reconciler {
       throw e;
     }
     this.statistics.optimizedNestedClosures++;
-    this.realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, effects);
+    this.realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, { effects, thisValue });
   }
 }

@@ -52,8 +52,8 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
 
     if (funcToModel.isCalledInMultipleContexts) return;
 
-    let previouslyComputedEffects = realm.collectedNestedOptimizedFunctionEffects.get(funcToModel);
-    if (previouslyComputedEffects !== undefined) {
+    let effectsObject = realm.collectedNestedOptimizedFunctionEffects.get(funcToModel);
+    if (effectsObject !== undefined) {
       if (realm.instantRender.enabled) {
         realm.instantRenderBailout("Array operators may only be optimized once", funcToModel.expressionLocation);
       } else {
@@ -106,8 +106,8 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
     if (abstractArrayValue.nestedOptimizedFunctionEffects === undefined) {
       abstractArrayValue.nestedOptimizedFunctionEffects = new Map();
     }
-    abstractArrayValue.nestedOptimizedFunctionEffects.set(funcToModel, effects);
-    realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, effects);
+    abstractArrayValue.nestedOptimizedFunctionEffects.set(funcToModel, { effects, thisValue });
+    realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, { effects, thisValue });
   }
 }
 
@@ -147,7 +147,7 @@ function modelUnknownPropertyOfSpecializedArray(
         }
         invariant(funcToModel instanceof ECMAScriptSourceFunctionValue);
         if (array.nestedOptimizedFunctionEffects !== undefined) {
-          let effects = array.nestedOptimizedFunctionEffects.get(funcToModel);
+          let { effects } = array.nestedOptimizedFunctionEffects.get(funcToModel);
           if (effects !== undefined) {
             invariant(effects.result instanceof SimpleNormalCompletion);
             let reachableObjects = Materialize.computeReachableObjects(realm, effects.result.value);
@@ -229,7 +229,7 @@ export default class ArrayValue extends ObjectValue {
   constructor(realm: Realm, intrinsicName?: string) {
     super(realm, realm.intrinsics.ArrayPrototype, intrinsicName);
   }
-  nestedOptimizedFunctionEffects: void | Map<ECMAScriptSourceFunctionValue, Effects>;
+  nestedOptimizedFunctionEffects: void | Map<ECMAScriptSourceFunctionValue, { effects: Effects, thisValue: Value }>;
 
   getKind(): ObjectKind {
     return "Array";

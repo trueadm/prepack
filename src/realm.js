@@ -308,7 +308,8 @@ export class Realm {
       enabled: opts.instantRender || false,
     };
 
-    this.outlineInternalFunctionCalls = false;
+    this.functionsToOutline = new Set();
+    this.outlinedFunctionMarkers = new Map();
 
     this.react = {
       abstractHints: new WeakMap(),
@@ -468,7 +469,7 @@ export class Realm {
   simplifyAndRefineAbstractValue: AbstractValue => Value;
   simplifyAndRefineAbstractCondition: AbstractValue => Value;
 
-  collectedNestedOptimizedFunctionEffects: Map<ECMAScriptSourceFunctionValue, Effects>;
+  collectedNestedOptimizedFunctionEffects: Map<ECMAScriptSourceFunctionValue, { effects: Effects, thisValue: Value }>;
   tracers: Array<Tracer>;
 
   MOBILE_JSC_VERSION = "jsc-600-1-4-17";

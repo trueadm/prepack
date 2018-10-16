@@ -69,7 +69,6 @@ import type {
 } from "@babel/types";
 import * as t from "@babel/types";
 import { PropertyDescriptor } from "../descriptors.js";
-import { PossiblyOutlineInternalFunctionCall } from "./outlining.js";
 
 export function InternalCall(
   realm: Realm,
@@ -920,11 +919,7 @@ export class FunctionImplementation {
 
   // ECMA262 9.2.1
   $Call(realm: Realm, F: ECMAScriptFunctionValue, thisArgument: Value, argsList: Array<Value>): Value {
-    if (F instanceof NativeFunctionValue || !realm.outlineInternalFunctionCalls) {
-      return InternalCall(realm, F, thisArgument, argsList, 0);
-    }
-    // realm.outlineInternalFunctionCalls = false;
-    return PossiblyOutlineInternalFunctionCall(realm, F, thisArgument, argsList);
+    return InternalCall(realm, F, thisArgument, argsList, 0);
   }
 
   // ECMA262 9.2.2

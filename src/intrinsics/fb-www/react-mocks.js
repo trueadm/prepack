@@ -318,9 +318,10 @@ let reactCode = `
       if (children == null) {
         return children;
       }
-      var result = [];
-      mapIntoWithKeyPrefixInternal(children, result, null, func, context);
-      return result;
+      if (Array.isArray(children)) {
+        return children.map(func);
+      }
+      return func(children);
     }
 
     function countChildren(children) {

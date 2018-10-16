@@ -182,24 +182,25 @@ export class Functions {
   // Note: this may only be used by nested optimized functions that are known to be evaluated inside of their parent
   // optimized function's __optimize call (e.g. array.map/filter). In this case, lexical nesting is equivalent to the
   // nesting of __optimize calls.
-  getDeclaringOptimizedFunction(functionValue: ECMAScriptSourceFunctionValue): void | FunctionValue {
+  getDeclaringOptimizedFunction(functionValue: ECMAScriptSourceFunctionValue, thisValue: Value): void | FunctionValue {
     for (let [optimizedFunctionValue, additionalEffects] of this._writeEffects) {
       // CreatedObjects is all objects created by this optimized function but not
       // nested optimized functions.
       let createdObjects = additionalEffects.effects.createdObjects;
-      if (createdObjects.has(functionValue)) return optimizedFunctionValue;
+      if (createdObjects.has(functionValue) || (thisValue instanceof ObjectValue && createdObjects.has(thisValue)))
+        return optimizedFunctionValue;
     }
   }
 
   processCollectedNestedOptimizedFunctions(): void {
-    for (let [functionValue, effects] of this.realm.collectedNestedOptimizedFunctionEffects) {
+    for (let [functionValue, { effects, thisValue }] of this.realm.collectedNestedOptimizedFunctionEffects) {
       let additionalFunctionEffects = createAdditionalEffects(
         this.realm,
         effects,
         true,
         "AdditionalFunctionEffects",
         functionValue,
-        this.getDeclaringOptimizedFunction(functionValue)
+        this.getDeclaringOptimizedFunction(functionValue, thisValue)
       );
       invariant(additionalFunctionEffects !== null);
       this._writeEffects.set(functionValue, additionalFunctionEffects);

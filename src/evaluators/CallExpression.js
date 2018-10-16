@@ -41,6 +41,7 @@ import type { BabelNodeCallExpression } from "@babel/types";
 import invariant from "../invariant.js";
 import SuperCall from "./SuperCall.js";
 import { createOperationDescriptor } from "../utils/generator.js";
+import { possiblyOutlineFunctionCall } from "../react/outlining.js";
 
 export default function(
   ast: BabelNodeCallExpression,
@@ -273,6 +274,9 @@ function tryToEvaluateCallOrLeaveAsAbstract(
   } catch (error) {
     if (error instanceof FatalError) {
       if (func instanceof NativeFunctionValue && func.name === "__fatal") throw error;
+      if (realm.trackFunctionCalls !== undefined) {
+        realm.trackFunctionCalls(func, true);
+      }
       realm.suppressDiagnostics = savedSuppressDiagnostics;
       Leak.value(realm, func, ast.loc);
       return realm.evaluateWithPossibleThrowCompletion(
@@ -285,6 +289,13 @@ function tryToEvaluateCallOrLeaveAsAbstract(
     }
   } finally {
     realm.suppressDiagnostics = savedSuppressDiagnostics;
+  }
+  if (realm.trackFunctionCalls !== undefined) {
+    realm.trackFunctionCalls(func, false);
+  }
+  if (realm.functionsToOutline.has(func)) {
+    let argList = ArgumentListEvaluation(realm, strictCode, env, ast.arguments);
+    return possiblyOutlineFunctionCall(realm, func, thisValue, argList, effects);
   }
   realm.applyEffects(effects);
   return realm.returnOrThrowCompletion(effects.result);

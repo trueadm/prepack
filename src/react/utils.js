@@ -23,8 +23,10 @@ import {
   ECMAScriptSourceFunctionValue,
   EmptyValue,
   FunctionValue,
+  NativeFunctionValue,
   NumberValue,
   ObjectValue,
+  PrimitiveValue,
   StringValue,
   SymbolValue,
   UndefinedValue,
@@ -36,7 +38,7 @@ import { Get, IsDataDescriptor } from "../methods/index.js";
 import { computeBinary } from "../evaluators/BinaryExpression.js";
 import type { AdditionalFunctionTransform, ReactEvaluatedNode } from "../serializer/types.js";
 import invariant from "../invariant.js";
-import { Create, Properties, To } from "../singletons.js";
+import { Create, Properties, To, Utils } from "../singletons.js";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import type { BabelNodeStatement } from "@babel/types";
@@ -900,12 +902,45 @@ export function convertConfigObjectToReactComponentTreeConfig(
   };
 }
 
+function applyOutliningHeuristicsToFunctionCalls(
+  realm: Realm,
+  func: ECMAScriptSourceFunctionValue | BoundFunctionValue,
+  funcCall: () => Value
+): Value {
+  let functionsToOutline = new Set();
+  realm.trackFunctionCalls = (F, bailedOut) => {
+    // Don't track internal native function calls or any
+    // function calls that bail-out.
+    if (F instanceof NativeFunctionValue || bailedOut) {
+      return;
+    }
+    functionsToOutline.add(F);
+  };
+  // Do a first pass to find all functions we can possibly
+  // outline.
+  let effects = realm.evaluateForEffects(funcCall, null, "applyOutliningHeuristicsToFunctionCalls");
+
+  // Ensure the effects are pure before outlining, if they
+  // are not, bail-out of outlining any functions
+  if (!Utils.areEffectsPure(realm, effects, func)) {
+    realm.applyEffects(effects);
+    realm.returnOrThrowCompletion(effects.result);
+  }
+  // Mark the functions on the realm to be outlined
+  for (let f of functionsToOutline) {
+    realm.functionsToOutline.add(f);
+  }
+  // Do another pass, this time with the marked functions
+  // for outlining.
+  return funcCall();
+}
+
 export function getValueFromFunctionCall(
   realm: Realm,
   func: ECMAScriptSourceFunctionValue | BoundFunctionValue,
   funcThis: ObjectValue | AbstractObjectValue | UndefinedValue,
   args: Array<Value>,
-  outlineFunctionCall: boolean,
+  outlineFunctionCalls: boolean,
   isConstructor?: boolean = false
 ): Value {
   invariant(func.$Call, "Expected function to be a FunctionValue with $Call method");
@@ -918,10 +953,11 @@ export function getValueFromFunctionCall(
       invariant(newCall);
       value = newCall(args, func);
     } else {
-      if (outlineFunctionCall) {
-        realm.outlineInternalFunctionCalls = true;
+      if (outlineFunctionCalls) {
+        value = applyOutliningHeuristicsToFunctionCalls(realm, func, () => funcCall(funcThis, args));
+      } else {
+        value = funcCall(funcThis, args);
       }
-      value = funcCall(funcThis, args, true);
     }
     completion = new SimpleNormalCompletion(value);
   } catch (error) {

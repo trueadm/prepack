@@ -347,7 +347,7 @@ class ReactDOMServerRenderer {
       let nestedOptimizedFunctionEffects = arrayValue.nestedOptimizedFunctionEffects;
 
       if (nestedOptimizedFunctionEffects !== undefined) {
-        for (let [func, effects] of nestedOptimizedFunctionEffects) {
+        for (let [func, { effects, thisValue }] of nestedOptimizedFunctionEffects) {
           let funcCall = () => {
             let result = effects.result;
             this.realm.applyEffects(effects);
@@ -368,8 +368,8 @@ class ReactDOMServerRenderer {
               invariant(false, "SSR _renderArrayValue side-effect should have been caught in main React reconciler");
             }
           );
-          nestedOptimizedFunctionEffects.set(func, resolvedEffects);
-          this.realm.collectedNestedOptimizedFunctionEffects.set(func, resolvedEffects);
+          nestedOptimizedFunctionEffects.set(func, { effects: resolvedEffects, thisValue });
+          this.realm.collectedNestedOptimizedFunctionEffects.set(func, { effects: resolvedEffects, thisValue });
         }
         return renderValueWithHelper(this.realm, arrayValue, this.arrayHelper);
       }

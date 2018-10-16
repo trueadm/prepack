@@ -15,7 +15,12 @@ import type {
   BabelNodeSourceLocation,
   BabelUnaryOperator,
 } from "@babel/types";
-import { Completion, JoinedAbruptCompletions, JoinedNormalAndAbruptCompletions } from "../completions.js";
+import {
+  Completion,
+  JoinedAbruptCompletions,
+  JoinedNormalAndAbruptCompletions,
+  SimpleNormalCompletion,
+} from "../completions.js";
 import { FatalError } from "../errors.js";
 import type { Realm } from "../realm.js";
 import { createOperationDescriptor, type OperationDescriptor } from "../utils/generator.js";
@@ -25,6 +30,7 @@ import {
   AbstractObjectValue,
   BooleanValue,
   ConcreteValue,
+  ECMAScriptFunctionValue,
   NullValue,
   NumberValue,
   ObjectValue,
@@ -1153,5 +1159,36 @@ export default class AbstractValue extends Value {
     }
     to.temporalAlias = temporalTo;
     return temporalTo;
+  }
+
+  static createOutlinedFunctionMarker(
+    realm: Realm,
+    F: ECMAScriptFunctionValue,
+    argsList: Array<Value>,
+    knownValues: Set<Value>,
+    clonableValues: Set<Value>,
+    unknownValues: Set<Value>,
+    effects: Effects
+  ): AbstractValue {
+    let result = effects.result;
+    if (result instanceof SimpleNormalCompletion) {
+      result = result.value;
+    }
+    invariant(result instanceof Value);
+    let marker = AbstractValue.createTemporalFromBuildFunction(
+      realm,
+      result.getType(),
+      [F, ...argsList],
+      createOperationDescriptor("OUTLINE_FUNCTION_CALL"),
+      { skipInvariant: true }
+    );
+    marker.kind = "outlined function marker";
+    realm.outlinedFunctionMarkers.set(marker, {
+      knownValues,
+      clonableValues,
+      unknownValues,
+      effects,
+    });
+    return marker;
   }
 }

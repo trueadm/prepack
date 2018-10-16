@@ -40,12 +40,12 @@ export function convertExpressionToJSXIdentifier(
       return t.jSXIdentifier(name);
     case "StringLiteral":
       let value = expr.value;
-      invariant(
-        // ensure the 1st character of the string is lowercase
-        // otherwise it will appear as a component
-        value.length > 0 && value[0] === value[0].toLowerCase(),
-        "invalid JSXIdentifer from string, strings must be lowercase"
-      );
+      // invariant(
+      //   // ensure the 1st character of the string is lowercase
+      //   // otherwise it will appear as a component
+      //   value.length > 0 && value[0] === value[0].toLowerCase(),
+      //   "invalid JSXIdentifer from string, strings must be lowercase"
+      // );
       return t.jSXIdentifier(value);
     case "MemberExpression":
       invariant(expr.computed === false, "Cannot inline computed expressions in JSX type.");
