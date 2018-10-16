@@ -1406,6 +1406,7 @@ export class Reconciler {
   ): ArrayValue {
     invariant(this.realm.isInPureScope());
     if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayValue)) {
+      debugger
       let nestedOptimizedFunctionEffects = arrayValue.nestedOptimizedFunctionEffects;
 
       if (nestedOptimizedFunctionEffects !== undefined) {

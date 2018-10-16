@@ -76,9 +76,6 @@ export function InternalCall(
   argsList: Array<Value>,
   tracerIndex: number
 ): Value {
-  if (F.__originalName === "FeedStoryUFITopLevelCommentList") {
-    debugger;
-  }
   realm.startCall();
   try {
     // 1. Assert: F is an ECMAScript function object.

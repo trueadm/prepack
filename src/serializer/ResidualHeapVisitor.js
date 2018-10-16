@@ -259,9 +259,8 @@ export class ResidualHeapVisitor {
       const originalAction = action;
       action = () => this.residualReactElementVisitor.loadEquivalenceSet(save, originalAction);
     }
-    let getParentScope = () => this.applyParentOptimizedFunctionEffectsFromScope(scope, action);
 
-    this.delayedActions.push({ scope, action: scope instanceof Generator ? getParentScope : action });
+    this.delayedActions.push({ scope, action });
   }
 
   // Queues up visiting a value in some arbitrary scope.
@@ -539,37 +538,6 @@ export class ResidualHeapVisitor {
     }
   }
 
-  applyParentOptimizedFunctionEffectsFromScope(scope: Generator, func): void {
-    let g = scope;
-
-    while (g !== "GLOBAL") {
-      g = this.generatorTree.getParent(g);
-      if (g instanceof ECMAScriptSourceFunctionValue) {
-        return this.applyParentOptimizedFunctionEffectsFromValue(g, func, false);
-      }
-    }
-    return func();
-  }
-
-  applyParentOptimizedFunctionEffectsFromValue(val: ECMAScriptSourceFunctionValue, func): void {
-    let additionalEffects = this.additionalFunctionValuesAndEffects.get(val);
-    if (additionalEffects !== undefined) {
-      if (additionalEffects.parentAdditionalFunction !== undefined) {
-        let parentEffects = this.additionalFunctionValuesAndEffects.get(additionalEffects.parentAdditionalFunction);
-        let effects = parentEffects.effects;
-        if (effects.canBeApplied) {
-          let result;
-          this.realm.withEffectsAppliedInGlobalEnv(() => {
-            result = func();
-            return this.realm.intrinsics.undefined;
-          }, effects);
-          return result;
-        }
-      }
-    }
-    return func();
-  }
-
   visitValueFunction(val: FunctionValue): void {
     let isClass = false;
 
@@ -646,9 +614,7 @@ export class ResidualHeapVisitor {
 
     let additionalFunctionEffects = this.additionalFunctionValuesAndEffects.get(val);
     if (additionalFunctionEffects) {
-      return this.applyParentOptimizedFunctionEffectsFromValue(val, () =>
-        this._visitAdditionalFunction(val, additionalFunctionEffects)
-      );
+      this._visitAdditionalFunction(val, additionalFunctionEffects);
     } else {
       this._enqueueWithUnrelatedScope(val, () => {
         invariant(this.scope === val);

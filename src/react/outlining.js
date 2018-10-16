@@ -181,8 +181,8 @@ function modelAndOptimizeOutlinedFunction(realm: Realm, func: ECMAScriptFunction
     );
   };
 
-  let effects = realm.isInPureScope() ? funcCall() : realm.evaluateWithPureScope(funcCall);
-  realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, { effects, thisValue });
+  // let effects = realm.isInPureScope() ? funcCall() : realm.evaluateWithPureScope(funcCall);
+  // realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, { effects, thisValue });
 }
 
 export function possiblyOutlineFunctionCall(
@@ -350,12 +350,6 @@ function cloneAndModelObjectValue(
   if (knownValues.has(val)) {
     return val;
   }
-  if (unknownValueNameMap.has(val)) {
-    let intrinsicName = unknownValueNameMap.get(val);
-    let clonedAbstractValue = AbstractValue.createFromType(realm, val.getType(), "outlined abstract intrinsic", []);
-    clonedAbstractValue.intrinsicName = intrinsicName;
-    return clonedAbstractValue;
-  }
   if (val instanceof ArrayValue) {
     invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
     invariant(clonableValues.has(val));
@@ -364,7 +358,7 @@ function cloneAndModelObjectValue(
     applyPostValueConfig(realm, val, clonedObject);
     if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
       if (val.nestedOptimizedFunctionEffects !== undefined) {
-        debugger;
+        clonedObject.nestedOptimizedFunctionEffects = val.nestedOptimizedFunctionEffects;
       }
       clonedObject.intrinsicName = unknownValueNameMap.get(val);
       clonedObject.isScopedTemplate = true;
@@ -395,12 +389,6 @@ function cloneAndModelAbstractValue(
     return val;
   }
   const kind = val.kind;
-  if (unknownValueNameMap.has(val)) {
-    let intrinsicName = unknownValueNameMap.get(val);
-    let clonedAbstractValue = AbstractValue.createFromType(realm, val.getType(), "outlined abstract intrinsic", []);
-    clonedAbstractValue.intrinsicName = intrinsicName;
-    return clonedAbstractValue;
-  }
   if (kind === "conditional") {
     invariant(clonableValues.has(val));
     // Conditional ops
@@ -555,6 +543,12 @@ function cloneAndModelValue(
 ): Value {
   if (realm.outlinedFunctionValues.has(val)) {
     debugger;
+  }
+  if (unknownValueNameMap.has(val) && !clonableValues.has(val)) {
+    let intrinsicName = unknownValueNameMap.get(val);
+    let clonedAbstractValue = AbstractValue.createFromType(realm, val.getType(), "outlined abstract intrinsic", []);
+    clonedAbstractValue.intrinsicName = intrinsicName;
+    return clonedAbstractValue;
   }
   if (val instanceof ConcreteValue) {
     if (val instanceof PrimitiveValue) {
