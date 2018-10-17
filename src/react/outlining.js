@@ -23,8 +23,9 @@ import {
 import invariant from "../invariant.js";
 import { AbruptCompletion, JoinedNormalAndAbruptCompletions, SimpleNormalCompletion } from "../completions.js";
 import { Get } from "../methods/index.js";
-import { Utils } from "../singletons.js";
+import { Properties, Utils } from "../singletons.js";
 import { isReactElement } from "./utils.js";
+import { cloneDescriptor, PropertyDescriptor } from "../descriptors.js";
 
 function shouldInlineConcreteValue(realm: Realm, val: ConcreteValue, funcEffects: Effects): void {
   if (val instanceof PrimitiveValue) {
@@ -142,7 +143,7 @@ function shouldCloneAbstractValue(
     }
     return true;
   }
-  if (val.isTemporal()) {
+  if (val.isTemporal() || val.kind === "outlined abstract intrinsic") {
     return false;
   }
   debugger;
@@ -183,11 +184,10 @@ export function possiblyOutlineFunctionCall(
     realm.applyEffects(originalEffects);
     return realm.returnOrThrowCompletion(originalEffects.result);
   };
-  let usesThis = thisArgument !== realm.intrinsics.undefined;
   let isPrimitive = result instanceof PrimitiveValue;
   let generator = originalEffects.generator;
 
-  if (isPrimitive || generator._entries.length === 0 || !Utils.areEffectsPure(realm, originalEffects, F)) {
+  if (isPrimitive || generator._entries.length < 3 || !Utils.areEffectsPure(realm, originalEffects, F)) {
     return inlineFunctionCall();
   }
   let shouldInline = false;
@@ -202,9 +202,176 @@ export function possiblyOutlineFunctionCall(
   if (shouldInline) {
     return inlineFunctionCall();
   }
+  let marker = AbstractValue.createOutlinedFunctionMarker(realm, F, argsList, originalEffects);
+
   if (shouldClone) {
-    debugger;
+    return createModelledValueFromValue(realm, result, marker.intrinsicName, originalEffects);
   }
 
-  return AbstractValue.createOutlinedFunctionMarker(realm, F, argsList, originalEffects);
+  return marker;
+}
+
+function applyPostValueConfig(realm: Realm, value: Value, clonedValue: Value, intrinsicName: string): void {
+  if (value instanceof ObjectValue && clonedValue instanceof ObjectValue) {
+    if (realm.react.reactProps.has(value)) {
+      realm.react.reactProps.add(clonedValue);
+    }
+    if (value.isPartialObject()) {
+      clonedValue.makePartial();
+    }
+    if (value.isSimpleObject()) {
+      clonedValue.makeSimple();
+    }
+    if (value.mightBeFinalObject()) {
+      clonedValue.makeFinal();
+    }
+    value.isScopedTemplate = true;
+    value.intrinsicNameGenerated = true;
+  }
+  value.intrinsicName = intrinsicName;
+}
+
+function cloneAndModelObjectPropertyDescriptor(
+  realm: Realm,
+  object: ObjectValue,
+  intrinsicName: null | string,
+  clonedObject: ObjectValue,
+  desc: PropertyDescriptor,
+  effects: Effects
+): PropertyDescriptor {
+  let clonedDesc = cloneDescriptor(desc);
+  invariant(clonedDesc !== undefined);
+  if (desc.value !== undefined) {
+    let value = desc.value;
+    if (value === object) {
+      value = clonedObject;
+    }
+    let clonedValue = cloneAndModelValue(realm, value, intrinsicName, effects);
+    clonedDesc.value = clonedValue;
+  } else {
+    invariant(false, "// TODO handle get/set in cloneAndModelObjectPropertyDescriptor");
+  }
+  return clonedDesc;
+}
+
+function cloneObjectProperties(
+  realm: Realm,
+  clonedObject: ObjectValue,
+  val: ObjectValue,
+  intrinsicName: null | string,
+  effects: Effects
+): void {
+  clonedObject.refuseSerialization = true;
+  // TODO do symbols
+  for (let [propName, { descriptor }] of val.properties) {
+    if (descriptor === undefined) {
+      continue;
+    }
+    // TODO support prototypes and callee
+    if (propName === "prototype" || propName === "callee") {
+      invariant(false, "TODO support prototype and callee");
+    }
+    invariant(descriptor instanceof PropertyDescriptor);
+    let propIntrinsicName = `${intrinsicName}.${propName}`;
+    let desc = cloneAndModelObjectPropertyDescriptor(realm, val, propIntrinsicName, clonedObject, descriptor, effects);
+    Properties.OrdinaryDefineOwnProperty(realm, clonedObject, propName, desc);
+  }
+  let unknownProperty = val.unknownProperty;
+  if (unknownProperty !== undefined) {
+    let desc;
+    let key;
+    if (unknownProperty.descriptor !== undefined) {
+      desc = cloneAndModelObjectPropertyDescriptor(realm, val, null, clonedObject, unknownProperty.descriptor, effects);
+    }
+    if (unknownProperty.key !== undefined) {
+      key = cloneAndModelValue(realm, unknownProperty.key, null, effects);
+    }
+    clonedObject.unknownProperty = {
+      descriptor: desc,
+      key,
+      object: clonedObject,
+    };
+  }
+  clonedObject.refuseSerialization = false;
+}
+
+function cloneAndModelObjectValue(
+  realm: Realm,
+  val: ObjectValue,
+  intrinsicName: null | string,
+  effects: Effects
+): ObjectValue {
+  if (!effects.createdObjects.has(val)) {
+    return val;
+  }
+  if (val instanceof ArrayValue) {
+    invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
+    let clonedObject = new ArrayValue(realm);
+    cloneObjectProperties(realm, clonedObject, val, intrinsicName, effects);
+    applyPostValueConfig(realm, val, clonedObject, intrinsicName);
+    return clonedObject;
+  } else if (val instanceof FunctionValue) {
+    let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
+    invariant(intrinsicName !== null);
+    abstract.intrinsicName = intrinsicName;
+    return abstract;
+  }
+  invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
+  let clonedObject = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
+  cloneObjectProperties(realm, clonedObject, val, intrinsicName, effects);
+  applyPostValueConfig(realm, val, clonedObject, intrinsicName);
+  return clonedObject;
+}
+
+function cloneAndModelAbstractValue(
+  realm: Realm,
+  val: AbstractValue,
+  intrinsicName: null | string,
+  effects: Effects
+): ObjectValue {
+  if (!effects.createdAbstracts.has(val)) {
+    return val;
+  }
+  let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
+  invariant(intrinsicName !== null);
+  abstract.intrinsicName = intrinsicName;
+  return abstract;
+}
+
+function cloneAndModelValue(realm: Realm, val: Value, intrinsicName: string, effects: Effects): Value {
+  if (val instanceof ConcreteValue) {
+    if (val instanceof PrimitiveValue) {
+      return val;
+    } else if (val instanceof ObjectValue) {
+      return cloneAndModelObjectValue(realm, val, intrinsicName, effects);
+    }
+  } else if (val instanceof AbstractValue) {
+    return cloneAndModelAbstractValue(realm, val, intrinsicName, effects);
+  }
+  invariant(false, "cloneValue was passed an unknown type of cloneValue");
+}
+
+function createModelledValueFromValue(
+  realm: Realm,
+  value: Value,
+  intrinsicName: null | string,
+  effects: Effects
+): Value {
+  let cloneAndModeledValue;
+  let modelledEffects;
+  realm.withEffectsAppliedInGlobalEnv(() => {
+    modelledEffects = realm.evaluateForEffects(
+      () => {
+        cloneAndModeledValue = cloneAndModelValue(realm, value, intrinsicName, effects);
+
+        return realm.intrinsics.undefined;
+      },
+      undefined,
+      "createAbstractTemporalValue"
+    );
+    return null;
+  }, effects);
+  invariant(cloneAndModeledValue instanceof Value);
+  realm.applyEffects(modelledEffects);
+  return cloneAndModeledValue;
 }
