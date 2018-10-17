@@ -902,37 +902,18 @@ export function convertConfigObjectToReactComponentTreeConfig(
   };
 }
 
-function applyOutliningHeuristicsToFunctionCalls(
+function outlineAllInnerFunctionCalls(
   realm: Realm,
   func: ECMAScriptSourceFunctionValue | BoundFunctionValue,
   funcCall: () => Value
 ): Value {
-  let functionsToOutline = new Set();
-  realm.trackFunctionCalls = (F, bailedOut) => {
-    // Don't track internal native function calls or any
-    // function calls that bail-out.
-    if (F instanceof NativeFunctionValue || bailedOut) {
-      return;
-    }
-    functionsToOutline.add(F);
-  };
-  // Do a first pass to find all functions we can possibly
-  // outline.
-  let effects = realm.evaluateForEffects(funcCall, null, "applyOutliningHeuristicsToFunctionCalls");
-
-  // Ensure the effects are pure before outlining, if they
-  // are not, bail-out of outlining any functions
-  if (!Utils.areEffectsPure(realm, effects, func)) {
-    realm.applyEffects(effects);
-    realm.returnOrThrowCompletion(effects.result);
+  // Enable the function outlining flag.
+  realm.react.outlineFunctionCalls = true;
+  try {
+    return funcCall();
+  } finally {
+    realm.react.outlineFunctionCalls = false;
   }
-  // Mark the functions on the realm to be outlined
-  for (let f of functionsToOutline) {
-    realm.functionsToOutline.add(f);
-  }
-  // Do another pass, this time with the marked functions
-  // for outlining.
-  return funcCall();
 }
 
 export function getValueFromFunctionCall(
@@ -954,7 +935,7 @@ export function getValueFromFunctionCall(
       value = newCall(args, func);
     } else {
       if (outlineFunctionCalls) {
-        value = applyOutliningHeuristicsToFunctionCalls(realm, func, () => funcCall(funcThis, args));
+        value = outlineAllInnerFunctionCalls(realm, func, () => funcCall(funcThis, args));
       } else {
         value = funcCall(funcThis, args);
       }

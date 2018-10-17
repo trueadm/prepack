@@ -54,7 +54,7 @@ export class FatalError extends Error {
   constructor(message?: string) {
     super(message === undefined ? "A fatal error occurred while prepacking." : message);
     this.x = x++;
-    // if (this.x === 2536) {
+    // if (this.x === 1981) {
     //   debugger;
     // }
   }

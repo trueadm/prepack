@@ -9,12 +9,15 @@
 
 /* @flow */
 
+import { DeclarativeEnvironmentRecord, GlobalEnvironmentRecord, LexicalEnvironment } from "../environment.js";
 import type { Realm } from "../realm.js";
 import {
+  AbstractObjectValue,
   AbstractValue,
   ArrayValue,
+  BoundFunctionValue,
   ConcreteValue,
-  ECMAScriptFunctionValue,
+  ECMAScriptSourceFunctionValue,
   FunctionValue,
   ObjectValue,
   PrimitiveValue,
@@ -23,9 +26,11 @@ import {
 import invariant from "../invariant.js";
 import { AbruptCompletion, JoinedNormalAndAbruptCompletions, SimpleNormalCompletion } from "../completions.js";
 import { Get } from "../methods/index.js";
-import { Properties, Utils } from "../singletons.js";
+import { Functions, Properties, Utils } from "../singletons.js";
 import { isReactElement } from "./utils.js";
 import { cloneDescriptor, PropertyDescriptor } from "../descriptors.js";
+import * as t from "@babel/types";
+import traverse from "@babel/traverse";
 
 function shouldInlineConcreteValue(realm: Realm, val: ConcreteValue, funcEffects: Effects): void {
   if (val instanceof PrimitiveValue) {
@@ -118,9 +123,6 @@ function shouldCloneConcreteValue(
         }
       }
     }
-    if (val instanceof FunctionValue) {
-      return false;
-    }
   }
   return true;
 }
@@ -143,11 +145,12 @@ function shouldCloneAbstractValue(
     }
     return true;
   }
+  if (val instanceof AbstractObjectValue && !val.values.isTop()) {
+    return true;
+  }
   if (val.isTemporal() || val.kind === "outlined abstract intrinsic") {
     return false;
   }
-  debugger;
-  return false;
 }
 
 function shouldCloneValue(
@@ -166,7 +169,7 @@ function shouldCloneValue(
 
 export function possiblyOutlineFunctionCall(
   realm: Realm,
-  F: ECMAScriptFunctionValue,
+  F: FunctionValue,
   thisArgument: Value,
   argsList: Array<Value>,
   originalEffects: Effects
@@ -187,7 +190,10 @@ export function possiblyOutlineFunctionCall(
   let isPrimitive = result instanceof PrimitiveValue;
   let generator = originalEffects.generator;
 
-  if (isPrimitive || generator._entries.length < 3 || !Utils.areEffectsPure(realm, originalEffects, F)) {
+  if (isPrimitive || generator._entries.length === 0 || !Utils.areEffectsPure(realm, originalEffects, F)) {
+    return inlineFunctionCall();
+  }
+  if (result instanceof FunctionValue) {
     return inlineFunctionCall();
   }
   let shouldInline = false;
@@ -295,6 +301,99 @@ function cloneObjectProperties(
   clonedObject.refuseSerialization = false;
 }
 
+function visitName(path: BabelTraversePath, bindings: Set<string>, name: string, read: boolean, write: boolean): void {
+  // Is the name bound to some local identifier? If so, we don't need to do anything
+  if (path.scope.hasBinding(name, /*noGlobals*/ true)) return;
+
+  // Otherwise, let's record that there's an unbound identifier
+  if (read) bindings.add(name);
+  if (write) bindings.add(name);
+}
+
+let FunctionClosureRefVisitor = {
+  ReferencedIdentifier(path: BabelTraversePath, bindings: Set<string>): void {
+    let innerName = path.node.name;
+    if (innerName === "arguments") {
+      bindings.usesArguments = true;
+      return;
+    }
+    visitName(path, bindings, innerName, true, false);
+  },
+  "AssignmentExpression|UpdateExpression"(path: BabelTraversePath, bindings: Set<string>): void {
+    let doesRead = path.node.operator !== "=";
+    for (let name in path.getBindingIdentifiers()) {
+      visitName(path, bindings, name, doesRead, true);
+    }
+  },
+};
+
+function getBinding(bindingName: string, originalEnv: LexicalEnvironment): Binding {
+  let env = originalEnv;
+
+  while (env !== null) {
+    let envRec = env.environmentRecord;
+
+    if (envRec instanceof DeclarativeEnvironmentRecord) {
+      let envBindings = envRec.bindings;
+
+      if (envBindings[bindingName]) {
+        return envBindings[bindingName];
+      }
+    } else if (envRec.parent instanceof GlobalEnvironmentRecord) {
+      // Prefer to not put functions into the global env
+      return env;
+    }
+    env = env.parent;
+  }
+}
+
+function cloneAndModelFunctionScopeForBindings(
+  realm: Realm,
+  scope: LexicalEnvironment,
+  bindings: Set<string>,
+  effects: Effects
+) {
+  let env = new LexicalEnvironment(realm);
+  let dclRec = new DeclarativeEnvironmentRecord(realm);
+  dclRec.creatingOptimizedFunction = scope.environmentRecord.creatingOptimizedFunction;
+  dclRec.lexicalEnvironment = env;
+  env.environmentRecord = dclRec;
+  if (bindings.size > 0) {
+    for (let bindingName of bindings) {
+      let binding = getBinding(bindingName, scope);
+      let clonedBinding = Object.assign({}, binding);
+      clonedBinding.environment = dclRec;
+      clonedBinding.value = cloneAndModelValue(realm, binding.value, null, effects);
+      dclRec.bindings[bindingName] = clonedBinding;
+    }
+  }
+  env.parent = scope.parent;
+  return env;
+}
+
+function cloneAndModelFunctionValue(
+  realm: Realm,
+  val: ECMAScriptSourceFunctionValue,
+  intrinsicName: string,
+  effects: Effects
+): ECMAScriptSourceFunctionValue {
+  let bindings = new Set();
+  let body = val.$ECMAScriptCode;
+  let params = val.$FormalParameters;
+
+  traverse(
+    t.file(t.program([t.expressionStatement(t.functionExpression(null, params, body))])),
+    FunctionClosureRefVisitor,
+    null,
+    bindings
+  );
+  traverse.cache.clear();
+  let clonedScope = cloneAndModelFunctionScopeForBindings(realm, val.$Environment, bindings, effects);
+  let clonedFunction = Functions.FunctionCreate(realm, val.$FunctionKind, params, body, clonedScope, val.$Strict);
+  applyPostValueConfig(realm, val, clonedFunction, intrinsicName);
+  return clonedFunction;
+}
+
 function cloneAndModelObjectValue(
   realm: Realm,
   val: ObjectValue,
@@ -311,10 +410,22 @@ function cloneAndModelObjectValue(
     applyPostValueConfig(realm, val, clonedObject, intrinsicName);
     return clonedObject;
   } else if (val instanceof FunctionValue) {
-    let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
-    invariant(intrinsicName !== null);
-    abstract.intrinsicName = intrinsicName;
-    return abstract;
+    invariant(val.$Prototype === realm.intrinsics.FunctionPrototype);
+    if (val instanceof BoundFunctionValue) {
+      let targetFunction = val.$BoundTargetFunction;
+      invariant(targetFunction instanceof ECMAScriptSourceFunctionValue);
+      let clonedTargetFunction = cloneAndModelFunctionValue(realm, targetFunction, intrinsicName, effects);
+      let clonedBoundFunction = Functions.BoundFunctionCreate(
+        realm,
+        clonedTargetFunction,
+        val.$BoundThis,
+        val.$BoundArguments
+      );
+      return clonedBoundFunction;
+    } else if (val instanceof ECMAScriptSourceFunctionValue) {
+      return cloneAndModelFunctionValue(realm, val, intrinsicName, effects);
+    }
+    invariant(false, "should never get here");
   }
   invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
   let clonedObject = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
@@ -331,6 +442,15 @@ function cloneAndModelAbstractValue(
 ): ObjectValue {
   if (!effects.createdAbstracts.has(val)) {
     return val;
+  }
+  if (val.kind === undefined && val instanceof AbstractObjectValue && !val.values.isTop()) {
+    let elements = Array.from(val.values.getElements());
+    if (elements.length === 1) {
+      let clonedTemplate = cloneAndModelValue(realm, elements[0], null, effects);
+      return AbstractValue.createAbstractObject(realm, intrinsicName, clonedTemplate);
+    } else {
+      debugger;
+    }
   }
   let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
   invariant(intrinsicName !== null);

@@ -290,10 +290,7 @@ function tryToEvaluateCallOrLeaveAsAbstract(
   } finally {
     realm.suppressDiagnostics = savedSuppressDiagnostics;
   }
-  if (realm.trackFunctionCalls !== undefined) {
-    realm.trackFunctionCalls(func, false);
-  }
-  if (realm.functionsToOutline.has(func)) {
+  if (realm.react.enabled && realm.react.outlineFunctionCalls) {
     let argList = ArgumentListEvaluation(realm, strictCode, env, ast.arguments);
     return possiblyOutlineFunctionCall(realm, func, thisValue, argList, effects);
   }

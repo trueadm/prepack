@@ -336,7 +336,6 @@ export class Realm {
       enabled: opts.instantRender || false,
     };
 
-    this.functionsToOutline = new Set();
     this.outlinedFunctionValues = new Map();
     this.forStatementBailoutFunctionCache = new Map();
 
@@ -354,6 +353,7 @@ export class Realm {
       hoistableReactElements: new WeakMap(),
       noopFunction: undefined,
       optimizeNestedFunctions: opts.reactOptimizeNestedFunctions || false,
+      outlineFunctionCalls: false,
       output: opts.reactOutput || "create-element",
       propsWithNoPartialKeyOrRef: new WeakSet(),
       reactElements: new WeakMap(),
