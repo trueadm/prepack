@@ -69,7 +69,7 @@ import type {
 import * as t from "@babel/types";
 import { PropertyDescriptor } from "../descriptors.js";
 
-export function InternalCall(
+function InternalCall(
   realm: Realm,
   F: ECMAScriptFunctionValue,
   thisArgument: Value,
@@ -101,10 +101,6 @@ export function InternalCall(
     // 4. Let calleeContext be PrepareForOrdinaryCall(F, undefined).
     let calleeContext = PrepareForOrdinaryCall(realm, F, undefined);
     let calleeEnv = calleeContext.lexicalEnvironment;
-
-    if (calleeEnv.parent === undefined) {
-      calleeEnv.parent = callerContext.lexicalEnvironment;
-    }
 
     let result;
     try {

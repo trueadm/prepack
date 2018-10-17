@@ -253,7 +253,7 @@ export function createClassInstanceForFirstRenderOnly(
     }
     if (stateToUpdate instanceof ObjectValue) {
       let newState = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
-      objectAssignCall(realm.intrinsics.undefined, [newState, prevState], true);
+      objectAssignCall(realm.intrinsics.undefined, [newState, prevState]);
       newState.makeFinal();
 
       for (let [key, binding] of stateToUpdate.properties) {
@@ -269,7 +269,7 @@ export function createClassInstanceForFirstRenderOnly(
       Properties.Set(realm, instance, "state", newState, true);
     }
     if (callback instanceof ECMAScriptSourceFunctionValue && callback.$Call) {
-      callback.$Call(instance, [], true);
+      callback.$Call(instance, []);
     }
     return realm.intrinsics.undefined;
   });
@@ -421,7 +421,7 @@ export function applyGetDerivedStateFromProps(
     } else if (state !== realm.intrinsics.null && state !== realm.intrinsics.undefined) {
       let newState = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
       try {
-        objectAssignCall(realm.intrinsics.undefined, [newState, prevState, state], true);
+        objectAssignCall(realm.intrinsics.undefined, [newState, prevState, state]);
       } catch (e) {
         if (realm.isInPureScope() && e instanceof FatalError) {
           let preludeGenerator = realm.preludeGenerator;

@@ -268,7 +268,7 @@ export default function(realm: Realm): void {
           invariant(functionValue instanceof ECMAScriptSourceFunctionValue);
           invariant(typeof functionValue.$Call === "function");
           let functionCall: Function = functionValue.$Call;
-          return realm.evaluateWithPureScope(() => functionCall(realm.intrinsics.undefined, [], true));
+          return realm.evaluateWithPureScope(() => functionCall(realm.intrinsics.undefined, []));
         }
       ),
       writable: true,
@@ -692,7 +692,7 @@ export default function(realm: Realm): void {
           let old = realm.eagerlyRequireModuleDependencies;
           realm.eagerlyRequireModuleDependencies = true;
           try {
-            return functionCall(realm.intrinsics.undefined, [], true);
+            return functionCall(realm.intrinsics.undefined, []);
           } finally {
             realm.eagerlyRequireModuleDependencies = old;
           }
