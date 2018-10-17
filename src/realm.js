@@ -338,6 +338,7 @@ export class Realm {
 
     this.functionsToOutline = new Set();
     this.outlinedFunctionValues = new Map();
+    this.outlinedFunctionMarkerData = new Map();
     this.forStatementBailoutFunctionCache = new Map();
 
     this.react = {

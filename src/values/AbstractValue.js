@@ -1165,19 +1165,24 @@ export default class AbstractValue extends Value {
     realm: Realm,
     F: ECMAScriptFunctionValue,
     argsList: Array<Value>,
-    effects: Effects
+    effects: Effects,
+    knownValues: Set<Value>,
+    renderValues: Set<Value>
   ): AbstractValue {
     let result = effects.result;
     if (result instanceof SimpleNormalCompletion) {
       result = result.value;
     }
     invariant(result instanceof Value);
-    return AbstractValue.createTemporalFromBuildFunction(
+    let value = AbstractValue.createTemporalFromBuildFunction(
       realm,
       result.getType(),
       [F, ...argsList],
       createOperationDescriptor("OUTLINE_FUNCTION_CALL"),
       { skipInvariant: true }
     );
+    value.kind = "outlined function marker";
+    realm.outlinedFunctionMarkerData.set(value, { effects, knownValues, renderValues, result });
+    return value;
   }
 }

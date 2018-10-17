@@ -37,6 +37,7 @@ import { computeBinary } from "../evaluators/BinaryExpression.js";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { PropertyDescriptor } from "../descriptors.js";
+import { createModelledValueFromOutlinedFunctionMarker } from "./outlining.js";
 
 function createPropsObject(
   realm: Realm,
@@ -404,6 +405,8 @@ export function createReactElement(
     invariant(consequentVal instanceof ObjectValue || consequentVal instanceof AbstractObjectValue);
     invariant(alternateVal instanceof ObjectValue || alternateVal instanceof AbstractObjectValue);
     return splitReactElementsByConditionalConfig(realm, condValue, consequentVal, alternateVal, type, children);
+  } else if (config instanceof AbstractValue && config.kind === "outlined function marker") {
+    config = createModelledValueFromOutlinedFunctionMarker(realm, config);
   }
   let { key, props, ref } = createPropsObject(realm, type, config, children);
   return createInternalReactElement(realm, type, key, ref, props);

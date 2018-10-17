@@ -382,9 +382,10 @@ export function convertSimpleClassComponentToFunctionalComponent(
               // remove the "this" from the member
               parentPath.replaceWith(parentNode.property);
             } else {
-              throw new FatalError(
-                `conversion of a simple class component to functional component failed due to "this" not being replaced`
-              );
+              // debugger;
+              // throw new FatalError(
+              //   `conversion of a simple class component to functional component failed due to "this" not being replaced`
+              // );
             }
           }
         },
