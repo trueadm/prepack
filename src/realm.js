@@ -147,6 +147,34 @@ export class Effects {
     );
   }
 
+  deepCloneWithResult(result: Completion): Effects {
+    let clonedProperties;
+    let clonedBindings;
+
+    if (this.modifiedProperties !== undefined) {
+      clonedProperties = new Map();
+      for (let [desc, propertyBinding] of this.modifiedProperties) {
+        clonedProperties.set(desc, propertyBinding);
+      }
+    }
+
+    if (this.modifiedBindings !== undefined) {
+      clonedBindings = new Map();
+      for (let [binding, bindingEntry] of this.modifiedBindings) {
+        clonedBindings.set(binding, bindingEntry);
+      }
+    }
+
+    return new Effects(
+      result,
+      this.generator,
+      clonedBindings,
+      clonedProperties,
+      this.createdObjects,
+      this.createdAbstracts
+    );
+  }
+
   toDisplayString(): string {
     return Utils.jsonToDisplayString(this, 10);
   }
@@ -310,6 +338,7 @@ export class Realm {
 
     this.functionsToOutline = new Set();
     this.outlinedFunctionValues = new Map();
+    this.forStatementBailoutFunctionCache = new Map();
 
     this.react = {
       abstractHints: new WeakMap(),

@@ -9,7 +9,7 @@
 
 /* @flow */
 
-import type { LexicalEnvironment } from "../environment.js";
+import { DeclarativeEnvironmentRecord, GlobalEnvironmentRecord, LexicalEnvironment } from "../environment.js";
 import { Realm } from "../realm.js";
 import {
   AbstractValue,
@@ -202,10 +202,34 @@ function ForBodyEvaluation(
   }
 }
 
+function visitName(
+  path: BabelTraversePath,
+  state: LeakedFunctionInfo,
+  name: string,
+  read: boolean,
+  write: boolean
+): void {
+  // Is the name bound to some local identifier? If so, we don't need to do anything
+  if (path.scope.hasBinding(name, /*noGlobals*/ true)) return;
+
+  // Otherwise, let's record that there's an unbound identifier
+  if (read) state.bindings.add(name);
+  if (write) state.bindings.add(name);
+}
+
 let BailOutWrapperClosureRefVisitor = {
-  ReferencedIdentifier(path: BabelTraversePath, state: BailOutWrapperInfo) {
-    if (path.node.name === "arguments") {
+  ReferencedIdentifier(path: BabelTraversePath, state: BailOutWrapperInfo): void {
+    let innerName = path.node.name;
+    if (innerName === "arguments") {
       state.usesArguments = true;
+      return;
+    }
+    visitName(path, state, innerName, true, false);
+  },
+  "AssignmentExpression|UpdateExpression"(path: BabelTraversePath, state: BailOutWrapperInfo): void {
+    let doesRead = path.node.operator !== "=";
+    for (let name in path.getBindingIdentifiers()) {
+      visitName(path, state, name, doesRead, true);
     }
   },
   ThisExpression(path: BabelTraversePath, state: BailOutWrapperInfo) {
@@ -301,6 +325,39 @@ let BailOutWrapperClosureRefVisitor = {
   },
 };
 
+function getHoistedEnvironmentForBindings(originalEnv: LexicalEnvironment, bindings: Set<string>): LexicalEnvironment {
+  let env = originalEnv;
+
+  while (env !== null) {
+    let envRec = env.environmentRecord;
+
+    if (envRec instanceof DeclarativeEnvironmentRecord) {
+      let envBindings = envRec.bindings;
+
+      for (let binding of bindings) {
+        if (envBindings[binding]) {
+          return env;
+        }
+      }
+    } else if (envRec.parent instanceof GlobalEnvironmentRecord) {
+      // Prefer to not put functions into the global env
+      return env;
+    }
+    env = env.parent;
+  }
+  return originalEnv;
+}
+
+function functionEnvInScope(targetEnv: LexicalEnvironment, env: LexicalEnvironment): boolean {
+  while (env !== null) {
+    if (targetEnv === env) {
+      return true;
+    }
+    env = env.parent;
+  }
+  return false;
+}
+
 function generateRuntimeForStatement(
   ast: BabelNodeForStatement,
   strictCode: boolean,
@@ -308,41 +365,80 @@ function generateRuntimeForStatement(
   realm: Realm,
   labelSet: ?Array<string>
 ): AbstractValue {
-  let wrapperFunction = new ECMAScriptSourceFunctionValue(realm);
-  let body = ((t.cloneDeep(t.blockStatement([ast])): any): BabelNodeBlockStatement);
-  wrapperFunction.initialize([], body);
-  wrapperFunction.$Environment = env;
-  // We need to scan to AST looking for "this", "return", "throw", labels and "arguments"
-  let functionInfo = {
-    usesArguments: false,
-    usesThis: false,
-    usesReturn: false,
-    usesGotoToLabel: false,
-    usesThrow: false,
-    varPatternUnsupported: false,
-  };
+  let wrapperFunction;
+  let functionInfo;
+  let effects;
 
-  traverse(
-    t.file(t.program([t.expressionStatement(t.functionExpression(null, [], body))])),
-    BailOutWrapperClosureRefVisitor,
-    null,
-    functionInfo
-  );
-  traverse.cache.clear();
-  let { usesReturn, usesThrow, usesArguments, usesGotoToLabel, varPatternUnsupported, usesThis } = functionInfo;
-
-  if (usesReturn || usesThrow || usesArguments || usesGotoToLabel || varPatternUnsupported) {
-    // We do not have support for these yet
-    let diagnostic = new CompilerDiagnostic(
-      `failed to recover from a for/while loop bail-out due to unsupported logic in loop body`,
-      realm.currentLocation,
-      "PP0037",
-      "FatalError"
-    );
-    realm.handleError(diagnostic);
-    throw new FatalError();
+  if (realm.forStatementBailoutFunctionCache.has(ast)) {
+    let cachedData = realm.forStatementBailoutFunctionCache.get(ast);
+    invariant(cachedData !== undefined);
+    if (functionEnvInScope(cachedData.wrapperFunction.$Environment, env)) {
+      debugger;
+      wrapperFunction = cachedData.wrapperFunction;
+      functionInfo = cachedData.functionInfo;
+      effects = cachedData.effects;
+    }
   }
+  if (functionInfo === undefined) {
+    effects = realm.evaluateForEffects(
+      () => {
+        wrapperFunction = new ECMAScriptSourceFunctionValue(realm);
+        let body = ((t.cloneDeep(t.blockStatement([ast])): any): BabelNodeBlockStatement);
+        wrapperFunction.initialize([], body);
+        // We need to scan to AST looking for "this", "return", "throw", labels and "arguments"
+        functionInfo = {
+          bindings: new Set(),
+          usesArguments: false,
+          usesThis: false,
+          usesReturn: false,
+          usesGotoToLabel: false,
+          usesThrow: false,
+          varPatternUnsupported: false,
+        };
+
+        traverse(
+          t.file(t.program([t.expressionStatement(t.functionExpression(null, [], body))])),
+          BailOutWrapperClosureRefVisitor,
+          null,
+          functionInfo
+        );
+        traverse.cache.clear();
+
+        wrapperFunction.$Environment = getHoistedEnvironmentForBindings(env, functionInfo.bindings);
+
+        let { usesReturn, usesThrow, usesArguments, usesGotoToLabel, varPatternUnsupported } = functionInfo;
+
+        if (usesReturn || usesThrow || usesArguments || usesGotoToLabel || varPatternUnsupported) {
+          // We do not have support for these yet
+          let diagnostic = new CompilerDiagnostic(
+            `failed to recover from a for/while loop bail-out due to unsupported logic in loop body`,
+            realm.currentLocation,
+            "PP0037",
+            "FatalError"
+          );
+          realm.handleError(diagnostic);
+          throw new FatalError();
+        }
+
+        // We leak the wrapping function value, which in turn invokes the leak
+        // logic which is transitive. The leaking logic should recursively visit
+        // all bindings/objects in the loop and its body and mark the associated
+        // bindings/objects as leaked
+        Leak.value(realm, wrapperFunction);
+
+        return realm.intrinsics.undefined;
+      },
+      undefined,
+      "generateRuntimeForStatement"
+    );
+
+    // Cache the wrapperFunction
+    realm.forStatementBailoutFunctionCache.set(ast, { effects, functionInfo, wrapperFunction });
+  }
+  let usesThis = functionInfo.usesThis;
   let args = [wrapperFunction];
+  realm.applyEffects(effects.deepCloneWithResult());
+  invariant(wrapperFunction.isValid());
 
   if (usesThis) {
     let thisRef = env.evaluate(t.thisExpression(), strictCode);
@@ -350,12 +446,6 @@ function generateRuntimeForStatement(
     Leak.value(realm, thisVal);
     args.push(thisVal);
   }
-
-  // We leak the wrapping function value, which in turn invokes the leak
-  // logic which is transitive. The leaking logic should recursively visit
-  // all bindings/objects in the loop and its body and mark the associated
-  // bindings/objects as leaked
-  Leak.value(realm, wrapperFunction);
 
   let wrapperValue = AbstractValue.createTemporalFromBuildFunction(
     realm,

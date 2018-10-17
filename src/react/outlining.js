@@ -13,10 +13,8 @@ import type { Realm } from "../realm.js";
 import {
   AbstractValue,
   ArrayValue,
-  BoundFunctionValue,
   ConcreteValue,
   ECMAScriptFunctionValue,
-  ECMAScriptSourceFunctionValue,
   FunctionValue,
   ObjectValue,
   PrimitiveValue,
@@ -29,6 +27,7 @@ import { PropertyDescriptor, cloneDescriptor } from "../descriptors.js";
 import { Get } from "../methods/index.js";
 import { Properties, Utils } from "../singletons.js";
 import { createOperationDescriptor } from "../utils/generator.js";
+import { isReactElement } from "./utils.js";
 
 function getOutliningValuesFromConcreteValue(
   realm: Realm,
@@ -36,15 +35,24 @@ function getOutliningValuesFromConcreteValue(
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
-  unknownValues: Set<Value>
+  unknownValues: Set<Value>,
+  renderValues: Set<Value>,
+  isRenderObjectValues?: boolean = false
 ): void {
   if (val instanceof PrimitiveValue) {
     knownValues.add(val);
   } else if (val instanceof ObjectValue) {
-    if (funcEffects !== undefined && !funcEffects.createdObjects.has(val)) {
+    if (funcEffects.createdObjects.has(val)) {
+      unknownValues.add(val);
+    } else {
       knownValues.add(val);
-      return;
     }
+    // These values are key to React component tree optimizations
+    if (isReactElement(val) || ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+      renderValues.add(val);
+      isRenderObjectValues = true;
+    }
+
     for (let [propName, binding] of val.properties) {
       if (binding && binding.descriptor) {
         // TODO support prototypes and callee
@@ -57,32 +65,53 @@ function getOutliningValuesFromConcreteValue(
         }
         invariant(val instanceof ObjectValue);
         let propVal = Get(realm, val, propName);
-        getOutliningValues(realm, propVal, funcEffects, knownValues, clonableValues, unknownValues);
+        collectOutliningValues(
+          realm,
+          propVal,
+          funcEffects,
+          knownValues,
+          clonableValues,
+          unknownValues,
+          renderValues,
+          isRenderObjectValues
+        );
       }
     }
     let unknownProperty = val.unknownProperty;
     if (unknownProperty !== undefined) {
       if (unknownProperty.key instanceof Value) {
-        getOutliningValues(realm, unknownProperty.key, funcEffects, knownValues, clonableValues, unknownValues);
+        collectOutliningValues(
+          realm,
+          unknownProperty.key,
+          funcEffects,
+          knownValues,
+          clonableValues,
+          unknownValues,
+          renderValues,
+          isRenderObjectValues
+        );
       }
       let descriptor = unknownProperty.descriptor;
       if (descriptor !== undefined && descriptor.value instanceof Value) {
-        getOutliningValues(realm, descriptor.value, funcEffects, knownValues, clonableValues, unknownValues);
+        collectOutliningValues(
+          realm,
+          descriptor.value,
+          funcEffects,
+          knownValues,
+          clonableValues,
+          unknownValues,
+          renderValues,
+          isRenderObjectValues
+        );
       }
     }
     if (val instanceof ArrayValue) {
       invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
       clonableValues.add(val);
-      if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
-        unknownValues.add(val);
-      }
     } else if (val instanceof FunctionValue) {
       invariant(val.$Prototype === realm.intrinsics.FunctionPrototype);
-      // we don't handle unknown values just yet
-      unknownValues.add(val);
-    } else if (val.$Prototype !== realm.intrinsics.ObjectPrototype) {
-      unknownValues.add(val);
-    } else {
+      // We don't handle cloning functions at this point
+    } else if (val.$Prototype === realm.intrinsics.ObjectPrototype) {
       clonableValues.add(val);
     }
   }
@@ -95,27 +124,61 @@ function getOutliningValuesFromAbstractValue(
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
   unknownValues: Set<Value>,
-  noCloningAbstracts?: boolean
+  renderValues: Set<Value>,
+  isRenderObjectValues?: boolean = false
 ): void {
-  if (!funcEffects.createdAbstracts.has(val)) {
-    knownValues.add(val);
-    return;
-  }
-  if (noCloningAbstracts) {
+  if (funcEffects.createdAbstracts.has(val)) {
     unknownValues.add(val);
-    return;
+  } else {
+    knownValues.add(val);
   }
   const kind = val.kind;
   if (kind === "conditional") {
     clonableValues.add(val);
     let [condValue, consequentVal, alternateVal] = val.args;
-    getOutliningValues(realm, condValue, funcEffects, knownValues, clonableValues, unknownValues, true);
-    getOutliningValues(realm, consequentVal, funcEffects, knownValues, clonableValues, unknownValues);
-    getOutliningValues(realm, alternateVal, funcEffects, knownValues, clonableValues, unknownValues);
+    collectOutliningValues(
+      realm,
+      condValue,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValues,
+      renderValues,
+      isRenderObjectValues
+    );
+    collectOutliningValues(
+      realm,
+      consequentVal,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValues,
+      renderValues,
+      isRenderObjectValues
+    );
+    collectOutliningValues(
+      realm,
+      alternateVal,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValues,
+      renderValues,
+      isRenderObjectValues
+    );
   } else if (val.args.length > 0) {
     clonableValues.add(val);
     for (let arg of val.args) {
-      getOutliningValues(realm, arg, funcEffects, knownValues, clonableValues, unknownValues);
+      collectOutliningValues(
+        realm,
+        arg,
+        funcEffects,
+        knownValues,
+        clonableValues,
+        unknownValues,
+        renderValues,
+        isRenderObjectValues
+      );
     }
   } else if (kind === "widened numeric property") {
     clonableValues.add(val);
@@ -123,25 +186,33 @@ function getOutliningValuesFromAbstractValue(
     clonableValues.add(val);
   } else if (kind !== undefined && kind.startsWith("template:")) {
     clonableValues.add(val);
-  } else {
-    unknownValues.add(val);
   }
 }
 
-function getOutliningValues(
+function collectOutliningValues(
   realm: Realm,
   val: Value,
   funcEffects: Effects,
   knownValues: Set<Value>,
   clonableValues: Set<Value>,
   unknownValues: Set<Value>,
-  noCloningAbstracts?: boolean
+  renderValues: Set<Value>,
+  isRenderObjectValues?: boolean = false
 ): void {
-  if (val.x === 184733) {
-    debugger;
+  if (isRenderObjectValues) {
+    renderValues.add(val);
   }
   if (val instanceof ConcreteValue) {
-    return getOutliningValuesFromConcreteValue(realm, val, funcEffects, knownValues, clonableValues, unknownValues);
+    return getOutliningValuesFromConcreteValue(
+      realm,
+      val,
+      funcEffects,
+      knownValues,
+      clonableValues,
+      unknownValues,
+      renderValues,
+      isRenderObjectValues
+    );
   } else if (val instanceof AbstractValue) {
     return getOutliningValuesFromAbstractValue(
       realm,
@@ -150,39 +221,11 @@ function getOutliningValues(
       knownValues,
       clonableValues,
       unknownValues,
-      noCloningAbstracts
+      renderValues,
+      isRenderObjectValues
     );
   }
   invariant(false, "unknown value type found in getOutliningValues");
-}
-
-function modelAndOptimizeOutlinedFunction(realm: Realm, func: ECMAScriptFunctionValue, thisValue: Value): void {
-  let funcToModel;
-  if (func instanceof BoundFunctionValue) {
-    funcToModel = func.$BoundTargetFunction;
-    thisValue = func.$BoundThis;
-  } else {
-    funcToModel = func;
-  }
-  invariant(funcToModel instanceof ECMAScriptSourceFunctionValue);
-  // We only need to optimize the function once
-  if (realm.collectedNestedOptimizedFunctionEffects.has(funcToModel)) {
-    return;
-  }
-  let funcCall = () => {
-    return realm.evaluateFunctionForPureEffects(
-      funcToModel,
-      Utils.createModelledFunctionCall(realm, funcToModel, undefined, thisValue),
-      null,
-      "outlining modelAndOptimizeOutlinedFunction",
-      () => {
-        debugger;
-      }
-    );
-  };
-
-  // let effects = realm.isInPureScope() ? funcCall() : realm.evaluateWithPureScope(funcCall);
-  // realm.collectedNestedOptimizedFunctionEffects.set(funcToModel, { effects, thisValue });
 }
 
 export function possiblyOutlineFunctionCall(
@@ -190,9 +233,9 @@ export function possiblyOutlineFunctionCall(
   F: ECMAScriptFunctionValue,
   thisArgument: Value,
   argsList: Array<Value>,
-  effects: Effects
+  originalEffects: Effects
 ): Value {
-  let result = effects.result;
+  let result = originalEffects.result;
   if (result instanceof AbruptCompletion) {
     debugger;
   } else if (result instanceof JoinedNormalAndAbruptCompletions) {
@@ -202,34 +245,72 @@ export function possiblyOutlineFunctionCall(
   }
   invariant(result instanceof Value);
   const inlineFunctionCall = () => {
-    realm.applyEffects(effects);
-    return realm.returnOrThrowCompletion(effects.result);
+    realm.applyEffects(originalEffects);
+    return realm.returnOrThrowCompletion(originalEffects.result);
   };
   let usesThis = thisArgument !== realm.intrinsics.undefined;
   let isPrimitive = result instanceof PrimitiveValue;
-  let generator = effects.generator;
+  let generator = originalEffects.generator;
+  let allArgsAreConcrete = argsList.every(arg => arg instanceof ConcreteValue);
 
-  if (usesThis || isPrimitive || !Utils.areEffectsPure(realm, effects, F) || generator._entries.length === 0) {
+  if (
+    usesThis ||
+    allArgsAreConcrete ||
+    isPrimitive ||
+    generator._entries.length === 0 ||
+    !Utils.areEffectsPure(realm, originalEffects, F)
+  ) {
     return inlineFunctionCall();
   }
   let knownValues = new Set();
   let clonableValues = new Set();
   let unknownValues = new Set();
+  let renderValues = new Set();
+
   realm.withEffectsAppliedInGlobalEnv(() => {
-    getOutliningValues(realm, result, effects, knownValues, clonableValues, unknownValues);
+    collectOutliningValues(realm, result, originalEffects, knownValues, clonableValues, unknownValues, renderValues);
     return realm.intrinsics.undefined;
-  }, effects);
-  modelAndOptimizeOutlinedFunction(realm, F, thisArgument);
-  let marker = AbstractValue.createOutlinedFunctionMarker(realm, F, argsList, effects);
-  return createModeledValueFromValue(
-    realm,
-    result,
-    marker.intrinsicName,
-    effects,
-    knownValues,
-    clonableValues,
-    unknownValues
-  );
+  }, originalEffects);
+
+  for (let renderValue of renderValues) {
+    if (unknownValues.has(renderValue)) {
+      return inlineFunctionCall();
+    }
+  }
+  // let funcCall = () => {
+  //   return realm.evaluateFunctionForPureEffects(
+  //     F,
+  //     Utils.createModelledFunctionCall(realm, F, undefined, thisArgument),
+  //     null,
+  //     "outlining modelAndOptimizeOutlinedFunction",
+  //     () => {
+  //       debugger;
+  //     }
+  //   );
+  // };
+
+  // let effects = realm.isInPureScope() ? funcCall() : realm.evaluateWithPureScope(funcCall);
+  // result = effects.result;
+  // if (result instanceof AbruptCompletion) {
+  //   debugger;
+  // } else if (result instanceof JoinedNormalAndAbruptCompletions) {
+  //   debugger;
+  // } else if (result instanceof SimpleNormalCompletion) {
+  //   result = result.value;
+  // }
+  // knownValues = new Set();
+  // clonableValues = new Set();
+  // unknownValues = new Set();
+  // renderValues = new Set();
+
+  // realm.withEffectsAppliedInGlobalEnv(() => {
+  //   collectOutliningValues(realm, result, effects, knownValues, clonableValues, unknownValues, renderValues);
+  //   return realm.intrinsics.undefined;
+  // }, effects);
+
+
+  // realm.collectedNestedOptimizedFunctionEffects.set(F, { effects, thisValue: thisArgument });
+  return AbstractValue.createOutlinedFunctionMarker(realm, F, argsList, originalEffects);
 }
 
 function applyPostValueConfig(realm: Realm, value: Value, clonedValue: Value): void {
