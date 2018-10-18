@@ -11,6 +11,7 @@
 
 import { Realm } from "../realm.js";
 import { AbruptCompletion, SimpleNormalCompletion } from "../completions.js";
+import { FunctionEnvironmentRecord, LexicalEnvironment } from "../environment.js";
 import type { BabelNode, BabelNodeJSXIdentifier } from "@babel/types";
 import { parseExpression } from "@babel/parser";
 import {
@@ -22,6 +23,7 @@ import {
   ECMAScriptFunctionValue,
   ECMAScriptSourceFunctionValue,
   EmptyValue,
+  NativeFunctionValue,
   FunctionValue,
   NumberValue,
   ObjectValue,
@@ -42,6 +44,7 @@ import * as t from "@babel/types";
 import type { BabelNodeStatement } from "@babel/types";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { cloneDescriptor, PropertyDescriptor } from "../descriptors.js";
+import { possiblyOutlineFunctionCall } from "../react/outlining.js";
 
 export type ReactSymbolTypes =
   | "react.element"
@@ -900,11 +903,64 @@ export function convertConfigObjectToReactComponentTreeConfig(
   };
 }
 
+function isTopLevelFunctionCall(
+  topLevelFunc: ECMAScriptSourceFunctionValue | BoundFunctionValue,
+  callEnv: LexicalEnvironment
+): boolean {
+  let env = callEnv;
+  let innerScope = topLevelFunc.$InnerEnvironment;
+
+  while (env !== null) {
+    let envRec = env.environmentRecord;
+
+    if (innerScope !== undefined && innerScope === env) {
+      return true;
+    } else if (envRec instanceof FunctionEnvironmentRecord) {
+      if (envRec.$FunctionObject === topLevelFunc) {
+        return true;
+      }
+      return false;
+    }
+    env = env.parent;
+  }
+  return false;
+}
+
+function outlineAllTopLevelFunctionCalls(
+  realm: Realm,
+  topLevelFunc: ECMAScriptSourceFunctionValue | BoundFunctionValue,
+  funcCall: () => Value
+): Value {
+  // Enable the function outlining flag.
+  realm.react.outlineTopLevelFunctionCallCallback = (
+    func: Value,
+    thisValue: Value,
+    argList: Array<Value>,
+    callEnv: LexicalEnvironment,
+    effects: Effects
+  ): Value | null => {
+    // Do not try to outline native function calls.
+    if (func instanceof NativeFunctionValue) {
+      return null;
+    }
+    if (!isTopLevelFunctionCall(topLevelFunc, callEnv)) {
+      return null;
+    }
+    return possiblyOutlineFunctionCall(realm, func, thisValue, argList, effects);
+  };
+  try {
+    return funcCall();
+  } finally {
+    realm.react.outlineTopLevelFunctionCallCallback = undefined;
+  }
+}
+
 export function getValueFromFunctionCall(
   realm: Realm,
   func: ECMAScriptSourceFunctionValue | BoundFunctionValue,
   funcThis: ObjectValue | AbstractObjectValue | UndefinedValue,
   args: Array<Value>,
+  outlineFunctionCalls: boolean,
   isConstructor?: boolean = false
 ): Value {
   invariant(func.$Call, "Expected function to be a FunctionValue with $Call method");
@@ -917,7 +973,11 @@ export function getValueFromFunctionCall(
       invariant(newCall);
       value = newCall(args, func);
     } else {
-      value = funcCall(funcThis, args);
+      if (outlineFunctionCalls) {
+        value = outlineAllTopLevelFunctionCalls(realm, func, () => funcCall(funcThis, args));
+      } else {
+        value = funcCall(funcThis, args);
+      }
     }
     completion = new SimpleNormalCompletion(value);
   } catch (error) {

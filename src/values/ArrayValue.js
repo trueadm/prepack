@@ -71,7 +71,7 @@ function evaluatePossibleNestedOptimizedFunctionsAndStoreEffects(
       invariant(funcToModel instanceof ECMAScriptSourceFunctionValue);
       return realm.evaluateFunctionForPureEffects(
         func,
-        Utils.createModelledFunctionCall(realm, funcToModel, undefined, thisValue),
+        () => Utils.createModelledFunctionCall(realm, funcToModel, undefined, thisValue)(),
         null,
         "temporalArray nestedOptimizedFunction",
         () => {

@@ -20,6 +20,7 @@ import {
   NullValue,
   NumberValue,
   ObjectValue,
+  PrimitiveValue,
   StringValue,
   SymbolValue,
   Value,
@@ -139,6 +140,41 @@ function throwUnsupportedSideEffectError(msg: string) {
   throw new UnsupportedSideEffect(msg);
 }
 
+function canSkipValueForConditionalLogic(realm: Realm, val: Value, depth: number = 0) {
+  if (val instanceof AbstractValue) {
+    let canSkip;
+
+    if (val.kind === "conditional") {
+      let [, leftValue, rightValue] = val.args;
+      canSkip = canSkipValueForConditionalLogic(realm, leftValue, depth + 1);
+      if (!canSkip) {
+        return false;
+      }
+      canSkip = canSkipValueForConditionalLogic(realm, rightValue, depth + 1);
+      if (!canSkip) {
+        return false;
+      }
+    } else if (val.kind === "||" || val.kind === "&&") {
+      let [leftValue, rightValue] = val.args;
+      canSkip = canSkipValueForConditionalLogic(realm, leftValue, depth + 1);
+      if (!canSkip) {
+        return false;
+      }
+      canSkip = canSkipValueForConditionalLogic(realm, rightValue, depth + 1);
+      if (!canSkip) {
+        return false;
+      }
+    }
+    if (valueIsKnownReactAbstraction(realm, val)) {
+      return false;
+    }
+    return true;
+  } else if (val instanceof PrimitiveValue) {
+    return true;
+  }
+  return false;
+}
+
 export class Reconciler {
   constructor(
     realm: Realm,
@@ -226,6 +262,7 @@ export class Reconciler {
     if (rootValue instanceof SymbolValue) {
       return;
     }
+    debugger;
     invariant(rootValue instanceof ECMAScriptSourceFunctionValue || rootValue instanceof AbstractValue);
     this.componentTreeState.deadEnds++;
     let componentType = getComponentTypeFromRootValue(this.realm, rootValue);
@@ -271,7 +308,7 @@ export class Reconciler {
     let renderMethod = Get(this.realm, instance, "render");
     invariant(renderMethod instanceof ECMAScriptSourceFunctionValue);
     // the render method doesn't have any arguments, so we just assign the context of "this" to be the instance
-    return getValueFromFunctionCall(this.realm, renderMethod, instance, []);
+    return getValueFromFunctionCall(this.realm, renderMethod, instance, []), true;
   }
 
   _resolveSimpleClassComponent(
@@ -287,7 +324,7 @@ export class Reconciler {
     let renderMethod = Get(this.realm, instance, "render");
     invariant(renderMethod instanceof ECMAScriptSourceFunctionValue);
     // the render method doesn't have any arguments, so we just assign the context of "this" to be the instance
-    return getValueFromFunctionCall(this.realm, renderMethod, instance, []);
+    return getValueFromFunctionCall(this.realm, renderMethod, instance, [], true);
   }
 
   _resolveFunctionalComponent(
@@ -296,7 +333,7 @@ export class Reconciler {
     context: ObjectValue | AbstractObjectValue,
     evaluatedNode: ReactEvaluatedNode
   ) {
-    return getValueFromFunctionCall(this.realm, componentType, this.realm.intrinsics.undefined, [props, context]);
+    return getValueFromFunctionCall(this.realm, componentType, this.realm.intrinsics.undefined, [props, context], true);
   }
 
   _getClassComponentMetadata(
@@ -445,9 +482,13 @@ export class Reconciler {
               // if the value is abstract, we need to keep the render prop as unless
               // we are in firstRenderOnly mode, where we can just inline the abstract value
               if (!(valueProp instanceof AbstractValue) || this.componentTreeConfig.firstRenderOnly) {
-                let result = getValueFromFunctionCall(this.realm, renderProp, this.realm.intrinsics.undefined, [
-                  valueProp,
-                ]);
+                let result = getValueFromFunctionCall(
+                  this.realm,
+                  renderProp,
+                  this.realm.intrinsics.undefined,
+                  [valueProp],
+                  false
+                );
                 this.statistics.inlinedComponents++;
                 this.statistics.componentsEvaluated++;
                 evaluatedChildNode.status = "INLINED";
@@ -497,10 +538,13 @@ export class Reconciler {
       forwardedComponent instanceof ECMAScriptSourceFunctionValue || forwardedComponent instanceof BoundFunctionValue,
       "expect React.forwardRef() to be passed function value"
     );
-    let value = getValueFromFunctionCall(this.realm, forwardedComponent, this.realm.intrinsics.undefined, [
-      propsValue,
-      refValue,
-    ]);
+    let value = getValueFromFunctionCall(
+      this.realm,
+      forwardedComponent,
+      this.realm.intrinsics.undefined,
+      [propsValue, refValue],
+      false
+    );
     return this._resolveDeeply(componentType, value, context, branchStatus, evaluatedChildNode);
   }
 
@@ -652,7 +696,7 @@ export class Reconciler {
     let renderMethod = Get(this.realm, instance, "render");
 
     invariant(renderMethod instanceof ECMAScriptSourceFunctionValue);
-    return getValueFromFunctionCall(this.realm, renderMethod, instance, []);
+    return getValueFromFunctionCall(this.realm, renderMethod, instance, [], true);
   }
 
   _resolveRelayContainer(
@@ -830,12 +874,19 @@ export class Reconciler {
 
   _resolveAbstractConditionalValue(
     componentType: Value,
+    originalAbstractValue: AbstractValue,
     condValue: AbstractValue,
     consequentVal: Value,
     alternateVal: Value,
     context: ObjectValue | AbstractObjectValue,
     evaluatedNode: ReactEvaluatedNode
   ) {
+    if (
+      canSkipValueForConditionalLogic(this.realm, consequentVal) &&
+      canSkipValueForConditionalLogic(this.realm, alternateVal)
+    ) {
+      return originalAbstractValue;
+    }
     let value = this.realm.evaluateWithAbstractConditional(
       condValue,
       () => {
@@ -880,6 +931,7 @@ export class Reconciler {
     if (operator === "||") {
       return this._resolveAbstractConditionalValue(
         componentType,
+        value,
         leftValue,
         leftValue,
         rightValue,
@@ -889,6 +941,7 @@ export class Reconciler {
     } else {
       return this._resolveAbstractConditionalValue(
         componentType,
+        value,
         leftValue,
         rightValue,
         leftValue,
@@ -912,6 +965,7 @@ export class Reconciler {
       invariant(condValue instanceof AbstractValue);
       return this._resolveAbstractConditionalValue(
         componentType,
+        value,
         condValue,
         consequentVal,
         alternateVal,
@@ -951,6 +1005,7 @@ export class Reconciler {
     let typeValue = getProperty(this.realm, reactElement, "type");
     let propsValue = getProperty(this.realm, reactElement, "props");
 
+    return reactElement;
     this._findReactComponentTrees(propsValue, evaluatedNode, "NORMAL_FUNCTIONS", componentType, context, branchStatus);
     if (typeValue instanceof AbstractValue) {
       this._findReactComponentTrees(

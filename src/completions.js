@@ -140,6 +140,7 @@ export class ThrowCompletion extends AbruptCompletion {
   constructor(value: Value, location: ?BabelNodeSourceLocation, nativeStack?: ?string, emitWarning?: boolean = true) {
     super(value, location);
     this.nativeStack = nativeStack || new Error().stack;
+    debugger;
   }
 
   nativeStack: string;

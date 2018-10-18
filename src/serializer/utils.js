@@ -226,6 +226,7 @@ export function handleReportedSideEffect(
   binding: void | Binding | PropertyBinding,
   expressionLocation: ?BabelNodeSourceLocation
 ): void {
+  return;
   // This causes an infinite recursion because creating a callstack causes internal-only side effects
   if (binding && binding.object && binding.object.intrinsicName === "__checkedBindings") return;
   let location = optionalStringOfLocation(expressionLocation);

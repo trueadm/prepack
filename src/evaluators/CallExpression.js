@@ -286,6 +286,14 @@ function tryToEvaluateCallOrLeaveAsAbstract(
   } finally {
     realm.suppressDiagnostics = savedSuppressDiagnostics;
   }
+  if (realm.react.enabled && realm.react.outlineTopLevelFunctionCallCallback !== undefined) {
+    let argList = ArgumentListEvaluation(realm, strictCode, env, ast.arguments);
+    let outlinedValueOrNull = realm.react.outlineTopLevelFunctionCallCallback(func, thisValue, argList, env, effects);
+    // If outlinedValueOrNull is null, then continue to inline the function call as normal
+    if (outlinedValueOrNull instanceof Value) {
+      return outlinedValueOrNull;
+    }
+  }
   realm.applyEffects(effects);
   return realm.returnOrThrowCompletion(effects.result);
 }

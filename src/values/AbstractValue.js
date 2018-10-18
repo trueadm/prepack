@@ -15,7 +15,12 @@ import type {
   BabelNodeSourceLocation,
   BabelUnaryOperator,
 } from "@babel/types";
-import { Completion, JoinedAbruptCompletions, JoinedNormalAndAbruptCompletions } from "../completions.js";
+import {
+  Completion,
+  JoinedAbruptCompletions,
+  JoinedNormalAndAbruptCompletions,
+  SimpleNormalCompletion,
+} from "../completions.js";
 import { FatalError } from "../errors.js";
 import type { Realm } from "../realm.js";
 import { createOperationDescriptor, type OperationDescriptor } from "../utils/generator.js";
@@ -90,6 +95,8 @@ type AbstractValueKindPrefix =
   | "abstractCounted"
   | "magicGlobalObject";
 
+var x = 0;
+
 export default class AbstractValue extends Value {
   constructor(
     realm: Realm,
@@ -113,6 +120,22 @@ export default class AbstractValue extends Value {
     this.hashValue = hashValue;
     this.kind = optionalArgs ? optionalArgs.kind : undefined;
     this.shape = optionalArgs ? optionalArgs.shape : undefined;
+    this.x = x++;
+    // if (this.x === 339110) {
+    //   debugger;
+    // }
+    // if (this.x === 336106) {
+    //   debugger;
+    // }
+    // if (this.x === 336105) {
+    //   debugger;
+    // }
+    // if (this.x === 335955) {
+    //   debugger;
+    // }
+    if (this.x === 83657) {
+      // debugger;
+    }
   }
 
   hashValue: number;
@@ -1153,5 +1176,25 @@ export default class AbstractValue extends Value {
     }
     to.temporalAlias = temporalTo;
     return temporalTo;
+  }
+
+  static createOutlinedFunctionMarker(
+    realm: Realm,
+    F: ECMAScriptFunctionValue,
+    argsList: Array<Value>,
+    effects: Effects
+  ): AbstractValue {
+    let result = effects.result;
+    if (result instanceof SimpleNormalCompletion) {
+      result = result.value;
+    }
+    invariant(result instanceof Value);
+    return AbstractValue.createTemporalFromBuildFunction(
+      realm,
+      result.getType(),
+      [F, ...argsList],
+      createOperationDescriptor("OUTLINE_FUNCTION_CALL"),
+      { skipInvariant: true, isPure: true }
+    );
   }
 }

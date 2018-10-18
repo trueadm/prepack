@@ -176,6 +176,13 @@ export class ResidualOperationSerializer {
     return babelNode;
   }
 
+  _serializeOutlineFunctionCall(
+    {  }: OperationDescriptorData,
+    [callFunc, ...funArgs]: Array<BabelNodeExpression>
+  ): BabelNodeExpression {
+    return t.callExpression(callFunc, ((funArgs: any): Array<BabelNodeExpression | BabelNodeSpreadElement>));
+  }
+
   serializeExpression(
     operationDescriptor: OperationDescriptor,
     nodes: Array<BabelNodeExpression>,
@@ -248,6 +255,9 @@ export class ResidualOperationSerializer {
         break;
       case "OBJECT_GET_PARTIAL":
         babelNode = this._serializeObjectGetPartial(data, nodes);
+        break;
+      case "OUTLINE_FUNCTION_CALL":
+        babelNode = this._serializeOutlineFunctionCall(data, nodes);
         break;
       case "ABSTRACT_OBJECT_GET_PARTIAL":
         babelNode = this._serializeAbstractObjectGetPartial(data, nodes);
