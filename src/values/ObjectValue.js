@@ -80,6 +80,9 @@ export default class ObjectValue extends ConcreteValue {
     // as a proxy for whether initialization is still ongoing.
     this.$IsClassPrototype = false;
     this.x = x++;
+    // if (this.x === 32203) {
+    //   debugger;
+    // }
   }
 
   static trackedPropertyNames = [

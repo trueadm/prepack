@@ -2019,6 +2019,12 @@ export class ResidualHeapSerializer {
       let obj = this.serializeValue(val.args[0]);
       let prop = this.serializeValue(val.args[1]);
       return t.memberExpression(obj, prop, true);
+    } else if (val.kind === "outlined abstract intrinsic") {
+      try {
+        return t.identifier(val.intrinsicName);
+      } catch (e) {
+        debugger;
+      }
     }
     invariant(val.operationDescriptor !== undefined);
     let serializedValue = this.residualOperationSerializer.serializeExpression(val.operationDescriptor, serializedArgs);

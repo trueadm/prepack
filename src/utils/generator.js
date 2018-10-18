@@ -1101,9 +1101,9 @@ export class Generator {
       options
     );
     res.intrinsicName = id;
-    if (id === "_$A") {
-      // debugger;
-    }
+    // if (id === "_$1Sg") {
+    //   debugger;
+    // }
     this._addDerivedEntry({
       isPure: optionalArgs ? optionalArgs.isPure : undefined,
       declared: res,

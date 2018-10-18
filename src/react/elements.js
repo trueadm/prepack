@@ -37,6 +37,7 @@ import { computeBinary } from "../evaluators/BinaryExpression.js";
 import { CompilerDiagnostic, FatalError } from "../errors.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { PropertyDescriptor } from "../descriptors.js";
+import { getModelledRenderValuesFromMarker } from "./outlining.js";
 
 function createPropsObject(
   realm: Realm,
@@ -394,10 +395,18 @@ export function createReactElement(
   config: ObjectValue | AbstractObjectValue,
   children: void | Value
 ): Value {
-  if (type instanceof AbstractValue && type.kind === "conditional") {
-    let [condValue, consequentVal, alternateVal] = type.args;
-    invariant(condValue instanceof AbstractValue);
-    return splitReactElementsByConditionalType(realm, condValue, consequentVal, alternateVal, config, children);
+  if (type instanceof AbstractValue) {
+    if (type.kind === "conditional") {
+      let [condValue, consequentVal, alternateVal] = type.args;
+      invariant(condValue instanceof AbstractValue);
+      return splitReactElementsByConditionalType(realm, condValue, consequentVal, alternateVal, config, children);
+    } else if (type.kind === "outlined function marker") {
+      let modelledValue = getModelledRenderValuesFromMarker(realm, type);
+      if (modelledValue === type) {
+        return type;
+      }
+      return createReactElement(realm, modelledValue, config, children);
+    }
   } else if (config instanceof AbstractObjectValue && config.kind === "conditional") {
     let [condValue, consequentVal, alternateVal] = config.args;
     invariant(condValue instanceof AbstractValue);

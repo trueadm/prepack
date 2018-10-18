@@ -322,6 +322,7 @@ export class Realm {
       hoistableReactElements: new WeakMap(),
       noopFunction: undefined,
       optimizeNestedFunctions: opts.reactOptimizeNestedFunctions || false,
+      outlinedFunctionMarkerData: new Map(),
       outlineTopLevelFunctionCallCallback: undefined,
       output: opts.reactOutput || "create-element",
       propsWithNoPartialKeyOrRef: new WeakSet(),

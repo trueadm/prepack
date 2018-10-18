@@ -24,6 +24,7 @@ import {
   NativeFunctionValue,
   NumberValue,
   ObjectValue,
+  PrimitiveValue,
   StringValue,
   SymbolValue,
   Value,
@@ -53,7 +54,6 @@ export default function(
   }
 
   // ECMA262 12.3.4.1
-
   // 1. Let ref be the result of evaluating MemberExpression.
   let ref = env.evaluate(ast.callee, strictCode);
 
@@ -99,15 +99,30 @@ function evaluateReference(
     if (base.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = base.args;
       invariant(condValue instanceof AbstractValue);
-      return evaluateConditionalReferenceBase(ref, condValue, consequentVal, alternateVal, ast, strictCode, env, realm);
+      if (valueShouldBeUsedForConditionalBase(consequentVal) || valueShouldBeUsedForConditionalBase(alternateVal)) {
+        return evaluateConditionalReferenceBase(
+          ref,
+          condValue,
+          consequentVal,
+          alternateVal,
+          ast,
+          strictCode,
+          env,
+          realm
+        );
+      }
     } else if (base.kind === "||") {
       let [leftValue, rightValue] = base.args;
       invariant(leftValue instanceof AbstractValue);
-      return evaluateConditionalReferenceBase(ref, leftValue, leftValue, rightValue, ast, strictCode, env, realm);
+      if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(rightValue)) {
+        return evaluateConditionalReferenceBase(ref, leftValue, leftValue, rightValue, ast, strictCode, env, realm);
+      }
     } else if (base.kind === "&&") {
       let [leftValue, rightValue] = base.args;
       invariant(leftValue instanceof AbstractValue);
-      return evaluateConditionalReferenceBase(ref, leftValue, rightValue, leftValue, ast, strictCode, env, realm);
+      if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(rightValue)) {
+        return evaluateConditionalReferenceBase(ref, leftValue, rightValue, leftValue, ast, strictCode, env, realm);
+      }
     }
     let referencedName = ref.referencedName;
 
@@ -138,6 +153,40 @@ function evaluateReference(
   let func = Environment.GetValue(realm, ref);
 
   return EvaluateCall(ref, func, ast, strictCode, env, realm);
+}
+
+function valueShouldBeUsedForConditionalBase(val) {
+  if (val instanceof ObjectValue) {
+    return true;
+  }
+  if (val instanceof PrimitiveValue) {
+    return false;
+  }
+  let shouldBeUsed;
+  if (val.kind === "conditional" || val.kind === "&&" || val.kind === "||") {
+    let [, left, right] = val.args;
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(right);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    return true;
+  }
+  if (val.kind === "&&" || val.kind === "||") {
+    let [left, right] = val.args;
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(right);
+    if (!shouldBeUsed) {
+      return false;
+    }
+  }
+  return val instanceof AbstractObjectValue && !val.values.isTop();
 }
 
 function evaluateConditionalReferenceBase(

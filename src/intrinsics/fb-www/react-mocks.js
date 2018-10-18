@@ -148,6 +148,22 @@ let reactCode = `
       return traverseAllChildrenImpl(children, '', callback, traverseContext);
     }
 
+    const MAYBE_ITERATOR_SYMBOL = typeof Symbol === 'function' && Symbol.iterator;
+    const FAUX_ITERATOR_SYMBOL = '@@iterator';
+
+    function getIteratorFn(maybeIterable) {
+      if (maybeIterable === null || typeof maybeIterable !== 'object') {
+        return null;
+      }
+      const maybeIterator =
+        (MAYBE_ITERATOR_SYMBOL && maybeIterable[MAYBE_ITERATOR_SYMBOL]) ||
+        maybeIterable[FAUX_ITERATOR_SYMBOL];
+      if (typeof maybeIterator === 'function') {
+        return maybeIterator;
+      }
+      return null;
+    }
+
     function getComponentKey(component, index) {
       // Do some typechecking here since we call this blindly. We want to ensure
       // that we don't block potential future ES APIs.
@@ -318,9 +334,10 @@ let reactCode = `
       if (children == null) {
         return children;
       }
-      var result = [];
-      mapIntoWithKeyPrefixInternal(children, result, null, func, context);
-      return result;
+      if (Array.isArray(children)) {
+        return children.map(func);
+      }
+      return func(children);
     }
 
     function countChildren(children) {

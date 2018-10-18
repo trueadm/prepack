@@ -133,9 +133,15 @@ export default class AbstractValue extends Value {
     // if (this.x === 335955) {
     //   debugger;
     // }
-    if (this.x === 83657) {
-      // debugger;
-    }
+    // if (this.x === 70034) {
+    //   debugger;
+    // }
+    // if (this.x === 69971) {
+    //   debugger;
+    // }
+    // if (this.x === 632235) {
+    //   debugger;
+    // }
   }
 
   hashValue: number;
@@ -175,7 +181,7 @@ export default class AbstractValue extends Value {
     function add_args(args: void | Array<Value>) {
       if (args === undefined) return;
       for (let val of args) {
-        if (val.intrinsicName) {
+        if (val.intrinsicName && val.kind !== "outlined abstract intrinsic") {
           add_intrinsic(val.intrinsicName);
         } else if (val instanceof AbstractValue) {
           val.addSourceNamesTo(names, visited);
@@ -186,7 +192,7 @@ export default class AbstractValue extends Value {
         }
       }
     }
-    if (this.intrinsicName) {
+    if (this.intrinsicName && this.kind !== "outlined abstract intrinsic") {
       add_intrinsic(this.intrinsicName);
     }
     add_args(this.args);
@@ -1189,12 +1195,15 @@ export default class AbstractValue extends Value {
       result = result.value;
     }
     invariant(result instanceof Value);
-    return AbstractValue.createTemporalFromBuildFunction(
+    let absVal = AbstractValue.createTemporalFromBuildFunction(
       realm,
       result.getType(),
       [F, ...argsList],
       createOperationDescriptor("OUTLINE_FUNCTION_CALL"),
-      { skipInvariant: true, isPure: true }
+      { skipInvariant: true }
     );
+    absVal.kind = "outlined function marker";
+    realm.react.outlinedFunctionMarkerData.set(absVal, { result, effects });
+    return absVal;
   }
 }

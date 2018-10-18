@@ -21,6 +21,7 @@ import {
   NullValue,
   NumberValue,
   ObjectValue,
+  PrimitiveValue,
   StringValue,
   SymbolValue,
   Value,
@@ -68,9 +69,37 @@ import type {
 import * as t from "@babel/types";
 
 function valueShouldBeUsedForConditionalBase(val) {
-  return;
-  val instanceof ObjectValue ||
-    (val instanceof AbstractValue && val instanceof AbstractObjectValue && !val.values.isTop());
+  if (val instanceof ObjectValue) {
+    return true;
+  }
+  if (val instanceof PrimitiveValue) {
+    return false;
+  }
+  let shouldBeUsed;
+  if (val.kind === "conditional" || val.kind === "&&" || val.kind === "||") {
+    let [, left, right] = val.args;
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(right);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    return true;
+  }
+  if (val.kind === "&&" || val.kind === "||") {
+    let [left, right] = val.args;
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(right);
+    if (!shouldBeUsed) {
+      return false;
+    }
+  }
+  return val instanceof AbstractObjectValue && !val.values.isTop();
 }
 
 export class EnvironmentImplementation {

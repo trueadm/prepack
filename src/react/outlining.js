@@ -32,16 +32,26 @@ import { cloneDescriptor, PropertyDescriptor } from "../descriptors.js";
 import * as t from "@babel/types";
 import traverse from "@babel/traverse";
 
-function shouldInlineConcreteValue(realm: Realm, val: ConcreteValue, funcEffects: Effects): void {
-  if (val instanceof PrimitiveValue) {
-    return false;
-  } else if (val instanceof ObjectValue) {
-    if (!funcEffects.createdObjects.has(val)) {
-      return false;
+function collectAllRenderValuesFromConcreteResult(
+  realm: Realm,
+  val: ConcreteValue,
+  funcEffects: Effects,
+  renderValues: Set<Value>,
+  insideObject: boolean
+): void {
+  if (val instanceof ObjectValue) {
+    if (isReactElement(val) || ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+      renderValues.add(val);
     }
-    // We only care about finding arrays with widened numeric properties
-    if (isReactElement(val) || ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val) || val instanceof FunctionValue) {
-      return true;
+    if (val instanceof FunctionValue && !insideObject) {
+      let compilerFlag = Get(realm, val, "name");
+      invariant(
+        compilerFlag !== realm.intrinsics.undefined,
+        `React function call outlining failed. Found ${val.__originalName || "anonymous"} component at line: ${
+          val.expressionLocation.start.line
+        }.\nEnsure component is a named function and not an anonymous one.`
+      );
+      renderValues.add(val);
     }
 
     for (let [propName, binding] of val.properties) {
@@ -56,46 +66,43 @@ function shouldInlineConcreteValue(realm: Realm, val: ConcreteValue, funcEffects
         }
         invariant(val instanceof ObjectValue);
         let propVal = Get(realm, val, propName);
-        let shouldInline = shouldInlineValue(realm, propVal, funcEffects);
-        if (shouldInline) {
-          return true;
-        }
+        collectAllRenderValuesFromResult(realm, propVal, funcEffects, renderValues, true);
       }
     }
   }
-  return false;
 }
 
-function shouldInlineAbstractValue(realm: Realm, val: AbstractValue, funcEffects: Effects): void {
-  if (!funcEffects.createdAbstracts.has(val)) {
-    return false;
-  }
+function collectAllRenderValuesFromAbstractResult(
+  realm: Realm,
+  val: AbstractValue,
+  funcEffects: Effects,
+  renderValues: Set<Value>,
+  insideObject: boolean
+): void {
   if (val.args.length > 0) {
     for (let arg of val.args) {
-      let shouldInline = shouldInlineValue(realm, arg, funcEffects);
-      if (shouldInline) {
-        return true;
-      }
+      collectAllRenderValuesFromResult(realm, arg, funcEffects, renderValues, insideObject);
     }
   } else if (val instanceof AbstractObjectValue && !val.values.isTop()) {
     let elements = Array.from(val.values.getElements());
     if (elements.length === 1) {
-      let shouldInline = shouldInlineValue(realm, elements[0], funcEffects);
-      if (shouldInline) {
-        return true;
-      }
+      collectAllRenderValuesFromResult(realm, elements[0], funcEffects, renderValues, insideObject);
     }
   }
-  return false;
 }
 
-function shouldInlineValue(realm: Realm, val: Value, funcEffects: Effects): void {
+function collectAllRenderValuesFromResult(
+  realm: Realm,
+  val: Value,
+  funcEffects: Effects,
+  renderValues: Set<Value>,
+  insideObject: boolean
+): void {
   if (val instanceof ConcreteValue) {
-    return shouldInlineConcreteValue(realm, val, funcEffects);
+    collectAllRenderValuesFromConcreteResult(realm, val, funcEffects, renderValues, insideObject);
   } else if (val instanceof AbstractValue) {
-    return shouldInlineAbstractValue(realm, val, funcEffects);
+    collectAllRenderValuesFromAbstractResult(realm, val, funcEffects, renderValues, insideObject);
   }
-  invariant(false, "unknown value type found in getOutliningValues");
 }
 
 function shouldCloneConcreteValue(
@@ -130,9 +137,6 @@ function shouldCloneConcreteValue(
           return false;
         }
       }
-    }
-    if (val instanceof FunctionValue) {
-      return false;
     }
   }
   return true;
@@ -214,18 +218,13 @@ export function possiblyOutlineFunctionCall(
   ) {
     return inlineFunctionCall();
   }
-  let shouldInline = false;
   let shouldClone = false;
 
   realm.withEffectsAppliedInGlobalEnv(() => {
-    shouldInline = shouldInlineValue(realm, result, originalEffects);
     shouldClone = shouldCloneValue(realm, result, originalEffects, true);
-    return realm.intrinsics.undefined;
+    return null;
   }, originalEffects);
 
-  if (shouldInline) {
-    return inlineFunctionCall();
-  }
   for (let arg of argsList) {
     if (arg instanceof ObjectValue) {
       // Materialize.materializeObject(realm, arg);
@@ -233,9 +232,9 @@ export function possiblyOutlineFunctionCall(
   }
   let marker = AbstractValue.createOutlinedFunctionMarker(realm, F, argsList, originalEffects);
 
-  // if (shouldClone) {
-  //   return createModelledValueFromValue(realm, result, marker.intrinsicName, originalEffects);
-  // }
+  if (shouldClone) {
+    return createModelledValueFromValue(realm, result, marker.intrinsicName, originalEffects);
+  }
 
   return marker;
 }
@@ -254,10 +253,10 @@ function applyPostValueConfig(realm: Realm, value: Value, clonedValue: Value, in
     if (value.mightBeFinalObject()) {
       clonedValue.makeFinal();
     }
-    value.isScopedTemplate = true;
-    value.intrinsicNameGenerated = true;
+    clonedValue.isScopedTemplate = true;
+    clonedValue.intrinsicNameGenerated = true;
   }
-  value.intrinsicName = intrinsicName;
+  clonedValue.intrinsicName = intrinsicName;
 }
 
 function cloneAndModelObjectPropertyDescriptor(
@@ -266,7 +265,8 @@ function cloneAndModelObjectPropertyDescriptor(
   intrinsicName: null | string,
   clonedObject: ObjectValue,
   desc: PropertyDescriptor,
-  effects: Effects
+  effects: Effects,
+  inReactElement: boolean
 ): PropertyDescriptor {
   let clonedDesc = cloneDescriptor(desc);
   invariant(clonedDesc !== undefined);
@@ -275,7 +275,7 @@ function cloneAndModelObjectPropertyDescriptor(
     if (value === object) {
       value = clonedObject;
     }
-    let clonedValue = cloneAndModelValue(realm, value, intrinsicName, effects);
+    let clonedValue = cloneAndModelValue(realm, value, intrinsicName, effects, inReactElement);
     clonedDesc.value = clonedValue;
   } else {
     invariant(false, "// TODO handle get/set in cloneAndModelObjectPropertyDescriptor");
@@ -283,12 +283,18 @@ function cloneAndModelObjectPropertyDescriptor(
   return clonedDesc;
 }
 
+function isPositiveInteger(str: string) {
+  let n = Math.floor(Number(str));
+  return n !== Infinity && String(n) === str && n >= 0;
+}
+
 function cloneObjectProperties(
   realm: Realm,
   clonedObject: ObjectValue,
   val: ObjectValue,
   intrinsicName: null | string,
-  effects: Effects
+  effects: Effects,
+  inReactElement: boolean
 ): void {
   clonedObject.refuseSerialization = true;
   // TODO do symbols
@@ -301,8 +307,16 @@ function cloneObjectProperties(
       invariant(false, "TODO support prototype and callee");
     }
     invariant(descriptor instanceof PropertyDescriptor);
-    let propIntrinsicName = `${intrinsicName}.${propName}`;
-    let desc = cloneAndModelObjectPropertyDescriptor(realm, val, propIntrinsicName, clonedObject, descriptor, effects);
+    let propIntrinsicName = `${intrinsicName}${isPositiveInteger(propName) ? `[${propName}]` : `.${propName}`}`;
+    let desc = cloneAndModelObjectPropertyDescriptor(
+      realm,
+      val,
+      propIntrinsicName,
+      clonedObject,
+      descriptor,
+      effects,
+      inReactElement
+    );
     Properties.OrdinaryDefineOwnProperty(realm, clonedObject, propName, desc);
   }
   let unknownProperty = val.unknownProperty;
@@ -310,10 +324,18 @@ function cloneObjectProperties(
     let desc;
     let key;
     if (unknownProperty.descriptor !== undefined) {
-      desc = cloneAndModelObjectPropertyDescriptor(realm, val, null, clonedObject, unknownProperty.descriptor, effects);
+      desc = cloneAndModelObjectPropertyDescriptor(
+        realm,
+        val,
+        null,
+        clonedObject,
+        unknownProperty.descriptor,
+        effects,
+        inReactElement
+      );
     }
     if (unknownProperty.key !== undefined) {
-      key = cloneAndModelValue(realm, unknownProperty.key, null, effects);
+      key = cloneAndModelValue(realm, unknownProperty.key, null, effects, inReactElement);
     }
     clonedObject.unknownProperty = {
       descriptor: desc,
@@ -350,7 +372,7 @@ let FunctionClosureRefVisitor = {
   },
 };
 
-function getBinding(bindingName: string, originalEnv: LexicalEnvironment): Binding {
+function getBinding(bindingName: string, originalEnv: LexicalEnvironment): null | Binding {
   let env = originalEnv;
 
   while (env !== null) {
@@ -362,12 +384,10 @@ function getBinding(bindingName: string, originalEnv: LexicalEnvironment): Bindi
       if (envBindings[bindingName]) {
         return envBindings[bindingName];
       }
-    } else if (envRec.parent instanceof GlobalEnvironmentRecord) {
-      // Prefer to not put functions into the global env
-      return env;
     }
     env = env.parent;
   }
+  return null;
 }
 
 function cloneAndModelFunctionScopeForBindings(
@@ -378,16 +398,21 @@ function cloneAndModelFunctionScopeForBindings(
 ) {
   let env = new LexicalEnvironment(realm);
   let dclRec = new DeclarativeEnvironmentRecord(realm);
+  env.____LOL = true;
   dclRec.creatingOptimizedFunction = scope.environmentRecord.creatingOptimizedFunction;
+  dclRec.____LOL = true;
   dclRec.lexicalEnvironment = env;
   env.environmentRecord = dclRec;
   if (bindings.size > 0) {
     for (let bindingName of bindings) {
       let binding = getBinding(bindingName, scope);
-      let clonedBinding = Object.assign({}, binding);
-      clonedBinding.environment = dclRec;
-      clonedBinding.value = cloneAndModelValue(realm, binding.value, null, effects);
-      dclRec.bindings[bindingName] = clonedBinding;
+      // If the binding is null then it's in global scope so we don't need to clone
+      if (binding !== null) {
+        let clonedBinding = Object.assign({}, binding);
+        clonedBinding.environment = dclRec;
+        clonedBinding.value = cloneAndModelValue(realm, binding.value, binding.name, effects);
+        dclRec.bindings[bindingName] = clonedBinding;
+      }
     }
   }
   env.parent = scope.parent;
@@ -421,7 +446,8 @@ function cloneAndModelObjectValue(
   realm: Realm,
   val: ObjectValue,
   intrinsicName: null | string,
-  effects: Effects
+  effects: Effects,
+  inReactElement: boolean
 ): ObjectValue {
   if (!effects.createdObjects.has(val)) {
     return val;
@@ -429,30 +455,31 @@ function cloneAndModelObjectValue(
   if (val instanceof ArrayValue) {
     invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
     let clonedObject = new ArrayValue(realm);
-    cloneObjectProperties(realm, clonedObject, val, intrinsicName, effects);
+    cloneObjectProperties(realm, clonedObject, val, intrinsicName, effects, isReactElement(val));
     applyPostValueConfig(realm, val, clonedObject, intrinsicName);
     return clonedObject;
   } else if (val instanceof FunctionValue) {
-    invariant(val.$Prototype === realm.intrinsics.FunctionPrototype);
-    let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
-    invariant(intrinsicName !== null);
-    abstract.intrinsicName = intrinsicName;
-    return abstract;
-    // if (val instanceof BoundFunctionValue) {
-    //   let targetFunction = val.$BoundTargetFunction;
-    //   invariant(targetFunction instanceof ECMAScriptSourceFunctionValue);
-    //   let clonedTargetFunction = cloneAndModelFunctionValue(realm, targetFunction, intrinsicName, effects);
-    //   let clonedBoundFunction = Functions.BoundFunctionCreate(
-    //     realm,
-    //     clonedTargetFunction,
-    //     val.$BoundThis,
-    //     val.$BoundArguments
-    //   );
-    //   return clonedBoundFunction;
-    // } else if (val instanceof ECMAScriptSourceFunctionValue) {
-    //   return cloneAndModelFunctionValue(realm, val, intrinsicName, effects);
-    // }
-    // invariant(false, "should never get here");
+    // console.log("function");
+    // invariant(val.$Prototype === realm.intrinsics.FunctionPrototype);
+    // let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
+    // invariant(intrinsicName !== null);
+    // abstract.intrinsicName = intrinsicName;
+    // return abstract;
+    if (val instanceof BoundFunctionValue) {
+      let targetFunction = val.$BoundTargetFunction;
+      invariant(targetFunction instanceof ECMAScriptSourceFunctionValue);
+      let clonedTargetFunction = cloneAndModelFunctionValue(realm, targetFunction, intrinsicName, effects);
+      let clonedBoundFunction = Functions.BoundFunctionCreate(
+        realm,
+        clonedTargetFunction,
+        val.$BoundThis,
+        val.$BoundArguments
+      );
+      return clonedBoundFunction;
+    } else if (val instanceof ECMAScriptSourceFunctionValue) {
+      return cloneAndModelFunctionValue(realm, val, intrinsicName, effects);
+    }
+    invariant(false, "should never get here");
   }
   invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
   let clonedObject = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
@@ -465,12 +492,14 @@ function cloneAndModelAbstractValue(
   realm: Realm,
   val: AbstractValue,
   intrinsicName: null | string,
-  effects: Effects
+  effects: Effects,
+  inReactElement: boolean
 ): ObjectValue {
   if (!effects.createdAbstracts.has(val)) {
     return val;
   }
-  if (val.kind === undefined && val instanceof AbstractObjectValue && !val.values.isTop()) {
+  const kind = val.kind;
+  if (kind === undefined && val instanceof AbstractObjectValue && !val.values.isTop()) {
     let elements = Array.from(val.values.getElements());
     if (elements.length === 1) {
       let clonedTemplate = cloneAndModelValue(realm, elements[0], null, effects);
@@ -478,14 +507,35 @@ function cloneAndModelAbstractValue(
     } else {
       debugger;
     }
+  } else if (kind === "widened numeric property") {
+    let clonedVal = AbstractValue.createFromType(realm, Value, "widened numeric property", [...val.args]);
+    return clonedVal;
+  } else if (kind === "outlined function marker" && inReactElement) {
+    debugger;
+  } else if (kind === "conditional") {
+    // The abstract might contain render values, such as functions or ReactElements
+    let renderValues = new Set();
+    collectAllRenderValuesFromResult(realm, val, effects, renderValues);
+    if (renderValues.size > 0) {
+      let renderValuesToJoin = Array.from(renderValues);
+      let condIntrinsicName = "__REACT_ARR__" + x++;
+      return joinRenderValuesAsConditional(realm, condIntrinsicName, renderValuesToJoin, effects);
+    }
   }
+
   let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
   invariant(intrinsicName !== null);
   abstract.intrinsicName = intrinsicName;
   return abstract;
 }
 
-function cloneAndModelValue(realm: Realm, val: Value, intrinsicName: string, effects: Effects): Value {
+function cloneAndModelValue(
+  realm: Realm,
+  val: Value,
+  intrinsicName: string,
+  effects: Effects,
+  inReactElement: boolean
+): Value {
   if (val instanceof ConcreteValue) {
     if (val instanceof PrimitiveValue) {
       return val;
@@ -506,10 +556,10 @@ function createModelledValueFromValue(
 ): Value {
   let cloneAndModeledValue;
   let modelledEffects;
-  realm.withEffectsAppliedInGlobalEnv(() => {
+  let modelFunc = () => {
     modelledEffects = realm.evaluateForEffects(
       () => {
-        cloneAndModeledValue = cloneAndModelValue(realm, value, intrinsicName, effects);
+        cloneAndModeledValue = cloneAndModelValue(realm, value, intrinsicName, effects, false);
 
         return realm.intrinsics.undefined;
       },
@@ -517,8 +567,70 @@ function createModelledValueFromValue(
       "createAbstractTemporalValue"
     );
     return null;
-  }, effects);
+  };
+
+  if (effects.canBeApplied) {
+    realm.withEffectsAppliedInGlobalEnv(modelFunc, effects);
+  } else {
+    modelFunc();
+  }
   invariant(cloneAndModeledValue instanceof Value);
   realm.applyEffects(modelledEffects);
   return cloneAndModeledValue;
+}
+
+var x = 0;
+
+export function getModelledRenderValuesFromMarker(realm: Realm, marker: AbstractValue): Value {
+  let markerData = realm.react.outlinedFunctionMarkerData.get(marker);
+  invariant(markerData !== undefined);
+  let { effects, result } = markerData;
+  let modelledValueOrMarker = marker;
+  let modelledEffects;
+  let modelFunc = () => {
+    modelledEffects = realm.evaluateForEffects(
+      () => {
+        let renderValues = new Set();
+        collectAllRenderValuesFromResult(realm, result, effects, renderValues);
+        if (renderValues.size > 0) {
+          let renderValuesToJoin = Array.from(renderValues);
+          let intrinsicName = "__REACT_ARR__" + x++;
+          modelledValueOrMarker = joinRenderValuesAsConditional(realm, intrinsicName, renderValuesToJoin, effects);
+        }
+        return realm.intrinsics.undefined;
+      },
+      undefined,
+      "createAbstractTemporalValue"
+    );
+    return null;
+  };
+  realm.withEffectsAppliedInGlobalEnv(modelFunc, effects);
+  invariant(modelledValueOrMarker instanceof Value);
+  realm.applyEffects(modelledEffects);
+  return modelledValueOrMarker;
+}
+
+function joinRenderValuesAsConditional(
+  realm: Realm,
+  intrinsicName: string,
+  renderValuesToJoin: Array<Value>,
+  effects: Effects
+): AbstractValue {
+  let condition = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
+  condition.intrinsicName = "__REACT_VALUE_COND__" + x++;
+  let renderValue = renderValuesToJoin.pop();
+  if (renderValue instanceof ConcreteValue) {
+    renderValue = createModelledValueFromValue(realm, renderValue, intrinsicName, effects);
+  }
+  if (renderValuesToJoin.length === 0) {
+    let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
+    abstract.intrinsicName = intrinsicName;
+    return AbstractValue.createFromConditionalOp(realm, condition, renderValue, abstract);
+  }
+  return AbstractValue.createFromConditionalOp(
+    realm,
+    condition,
+    renderValue,
+    joinRenderValuesAsConditional(realm, intrinsicName, renderValuesToJoin, effects)
+  );
 }
