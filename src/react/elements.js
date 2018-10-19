@@ -472,7 +472,7 @@ export function traverseReactElement(
     if (propsValue.properties.has("children")) {
       let childrenValue = getProperty(realm, propsValue, "children");
       if (childrenValue !== realm.intrinsics.undefined && childrenValue !== realm.intrinsics.null) {
-        if (childrenValue instanceof ArrayValue && !childrenValue.intrinsicName) {
+        if (childrenValue instanceof ArrayValue && !ArrayValue.isIntrinsicAndHasWidenedNumericProperty(childrenValue)) {
           let childrenLength = getProperty(realm, childrenValue, "length");
           if (childrenLength instanceof NumberValue) {
             loopArrayElements(childrenValue, childrenLength.value);

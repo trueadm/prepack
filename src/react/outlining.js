@@ -37,16 +37,21 @@ function collectAllRenderValuesFromConcreteResult(
   val: ConcreteValue,
   funcEffects: Effects,
   renderValues: Set<Value>,
-  insideObject: boolean
+  insideObject: boolean,
+  insideReactElement: boolean
 ): void {
   if (val instanceof ObjectValue) {
-    if (isReactElement(val) || ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+    if (isReactElement(val) && !insideReactElement) {
+      renderValues.add(val);
+      insideReactElement = true;
+    }
+    if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
       renderValues.add(val);
     }
     if (val instanceof FunctionValue && !insideObject) {
-      let compilerFlag = Get(realm, val, "name");
+      let functionName = Get(realm, val, "name");
       invariant(
-        compilerFlag !== realm.intrinsics.undefined,
+        functionName !== realm.intrinsics.undefined,
         `React function call outlining failed. Found ${val.__originalName || "anonymous"} component at line: ${
           val.expressionLocation.start.line
         }.\nEnsure component is a named function and not an anonymous one.`
@@ -66,7 +71,7 @@ function collectAllRenderValuesFromConcreteResult(
         }
         invariant(val instanceof ObjectValue);
         let propVal = Get(realm, val, propName);
-        collectAllRenderValuesFromResult(realm, propVal, funcEffects, renderValues, true);
+        collectAllRenderValuesFromResult(realm, propVal, funcEffects, renderValues, true, insideReactElement);
       }
     }
   }
@@ -77,16 +82,17 @@ function collectAllRenderValuesFromAbstractResult(
   val: AbstractValue,
   funcEffects: Effects,
   renderValues: Set<Value>,
-  insideObject: boolean
+  insideObject: boolean,
+  insideReactElement: boolean
 ): void {
   if (val.args.length > 0) {
     for (let arg of val.args) {
-      collectAllRenderValuesFromResult(realm, arg, funcEffects, renderValues, insideObject);
+      collectAllRenderValuesFromResult(realm, arg, funcEffects, renderValues, insideObject, insideReactElement);
     }
   } else if (val instanceof AbstractObjectValue && !val.values.isTop()) {
     let elements = Array.from(val.values.getElements());
     if (elements.length === 1) {
-      collectAllRenderValuesFromResult(realm, elements[0], funcEffects, renderValues, insideObject);
+      collectAllRenderValuesFromResult(realm, elements[0], funcEffects, renderValues, insideObject, insideReactElement);
     }
   }
 }
@@ -96,12 +102,13 @@ function collectAllRenderValuesFromResult(
   val: Value,
   funcEffects: Effects,
   renderValues: Set<Value>,
-  insideObject: boolean
+  insideObject: boolean,
+  insideReactElement: boolean
 ): void {
   if (val instanceof ConcreteValue) {
-    collectAllRenderValuesFromConcreteResult(realm, val, funcEffects, renderValues, insideObject);
+    collectAllRenderValuesFromConcreteResult(realm, val, funcEffects, renderValues, insideObject, insideReactElement);
   } else if (val instanceof AbstractValue) {
-    collectAllRenderValuesFromAbstractResult(realm, val, funcEffects, renderValues, insideObject);
+    collectAllRenderValuesFromAbstractResult(realm, val, funcEffects, renderValues, insideObject, insideReactElement);
   }
 }
 
@@ -205,12 +212,10 @@ export function possiblyOutlineFunctionCall(
   let resultIsPrimitive = result instanceof PrimitiveValue;
   let usesThis = thisValue !== realm.intrinsics.undefined;
   let generator = originalEffects.generator;
-  let allArgsArePrimitive = argsList.every(arg => arg instanceof PrimitiveValue);
   let notGeneratorEntriesCreated = generator._entries.length === 0;
 
   if (
-    usesThis ||
-    allArgsArePrimitive ||
+    // usesThis ||
     resultIsPrimitive ||
     F instanceof BoundFunctionValue ||
     notGeneratorEntriesCreated ||
@@ -518,8 +523,7 @@ function cloneAndModelAbstractValue(
     collectAllRenderValuesFromResult(realm, val, effects, renderValues);
     if (renderValues.size > 0) {
       let renderValuesToJoin = Array.from(renderValues);
-      let condIntrinsicName = "__REACT_ARR__" + x++;
-      return joinRenderValuesAsConditional(realm, condIntrinsicName, renderValuesToJoin, effects);
+      return joinRenderValuesAsConditional(realm, intrinsicName, renderValuesToJoin, effects);
     }
   }
 
@@ -540,10 +544,10 @@ function cloneAndModelValue(
     if (val instanceof PrimitiveValue) {
       return val;
     } else if (val instanceof ObjectValue) {
-      return cloneAndModelObjectValue(realm, val, intrinsicName, effects);
+      return cloneAndModelObjectValue(realm, val, intrinsicName, effects, inReactElement);
     }
   } else if (val instanceof AbstractValue) {
-    return cloneAndModelAbstractValue(realm, val, intrinsicName, effects);
+    return cloneAndModelAbstractValue(realm, val, intrinsicName, effects, inReactElement);
   }
   invariant(false, "cloneValue was passed an unknown type of cloneValue");
 }
@@ -617,10 +621,10 @@ function joinRenderValuesAsConditional(
   effects: Effects
 ): AbstractValue {
   let condition = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
-  condition.intrinsicName = "__REACT_VALUE_COND__" + x++;
+  condition.intrinsicName = "__REACT_COND__" + x++;
   let renderValue = renderValuesToJoin.pop();
   if (renderValue instanceof ConcreteValue) {
-    renderValue = createModelledValueFromValue(realm, renderValue, intrinsicName, effects);
+    renderValue = createModelledValueFromValue(realm, renderValue, intrinsicName + x++, effects);
   }
   if (renderValuesToJoin.length === 0) {
     let abstract = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);

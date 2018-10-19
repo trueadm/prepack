@@ -109,7 +109,7 @@ export function describeValue(value: Value): string {
     }
   }
   title += `, hash: ${value.getHash()}`;
-  if (value.intrinsicName !== undefined) title += `, intrinsic name: ${value.intrinsicName}`;
+  if (value.intrinsicName !== undefined) title += `, intrinsic name: ${value.intrinsicName}, x: ${value.x}`;
   if (value.__originalName !== undefined) title += `, original name: ${value.__originalName}`;
   return suffix ? `${title}\n${suffix}` : title;
 }

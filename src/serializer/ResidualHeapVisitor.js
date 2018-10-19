@@ -1066,12 +1066,12 @@ export class ResidualHeapVisitor {
     if (val instanceof ObjectValue) {
       invariant(val.isValid());
       if (isReactElement(val)) {
-        if (val.temporalAlias !== undefined) {
-          return this.visitEquivalentValue(val.temporalAlias);
-        }
-        let equivalentReactElementValue = this.residualReactElementVisitor.reactElementEquivalenceSet.add(val);
-        if (this._mark(equivalentReactElementValue)) this.visitValueObject(equivalentReactElementValue);
-        return (equivalentReactElementValue: any);
+        // if (val.temporalAlias !== undefined) {
+        //   return this.visitEquivalentValue(val.temporalAlias);
+        // }
+        // let equivalentReactElementValue = this.residualReactElementVisitor.reactElementEquivalenceSet.add(val);
+        // if (this._mark(equivalentReactElementValue)) this.visitValueObject(equivalentReactElementValue);
+        // return (equivalentReactElementValue: any);
       } else if (isReactPropsObject(val)) {
         let equivalentReactPropsValue = this.residualReactElementVisitor.reactPropsEquivalenceSet.add(val);
         if (this._mark(equivalentReactPropsValue)) this.visitValueObject(equivalentReactPropsValue);

@@ -1060,6 +1060,9 @@ export class ResidualHeapSerializer {
   }
 
   serializeValue(val: Value, referenceOnly?: boolean, bindingType?: BabelVariableKind): BabelNodeExpression {
+    if (val.x === 31394) {
+      debugger;
+    }
     invariant(!(val instanceof ObjectValue && val.refuseSerialization));
     if (val instanceof AbstractValue) {
       if (val.kind === "widened") {
@@ -2020,11 +2023,11 @@ export class ResidualHeapSerializer {
       let prop = this.serializeValue(val.args[1]);
       return t.memberExpression(obj, prop, true);
     } else if (val.kind === "outlined abstract intrinsic") {
-      try {
-        return t.identifier(val.intrinsicName);
-      } catch (e) {
+      if (val.x === 31392) {
         debugger;
       }
+      this.serializedValues.add(val);
+      return t.identifier(val.intrinsicName);
     }
     invariant(val.operationDescriptor !== undefined);
     let serializedValue = this.residualOperationSerializer.serializeExpression(val.operationDescriptor, serializedArgs);

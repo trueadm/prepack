@@ -229,9 +229,6 @@ class ObjectValueLeakingVisitor {
     // if this object wasn't already leaked, we need mark it as leaked
     // so that any mutation and property access get tracked after this.
     if (obj.mightNotBeLeakedObject()) {
-      if (obj.x === 30579) {
-        debugger;
-      }
       obj.leak();
 
       // materialization is a common operation and needs to be invoked
