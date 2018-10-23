@@ -1158,8 +1158,28 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
       case "CALL_BAILOUT":
         return false;
       default:
-        debugger;
-        return false;
+        invariant(false, "TODO");
+    }
+  }
+  return false;
+}
+
+export function getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: Value): string {
+  if (realm.react.propsWithNoPartialKeyOrRef.has(val) || realm.react.reactProps.has(val)) {
+    return val.intrinsicName;
+  }
+  if (val instanceof AbstractValue && val.isTemporal()) {
+    let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+    invariant(temporalOperationEntry !== undefined);
+    let { args, operationDescriptor } = temporalOperationEntry;
+    switch (operationDescriptor.type) {
+      case "ABSTRACT_PROPERTY":
+      case "ABSTRACT_OBJECT_GET":
+        // First arg is the parent object/abstract
+        let propName = args[1] instanceof StringValue ? args[1].value : args[1];
+        return `${getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm, args[0])}.${propName}`;
+      default:
+        invariant(false, "TODO");
     }
   }
   return false;

@@ -39,6 +39,7 @@ import { ObjectValue, Value, FunctionValue } from "../values/index.js";
 import { Properties } from "../singletons.js";
 import { PropertyDescriptor } from "../descriptors.js";
 import { ResidualOptimizedFunctions } from "./ResidualOptimizedFunctions";
+import { stripDeadReactElementNodes } from "../react/outlining.js";
 
 export class Serializer {
   constructor(realm: Realm, serializerOptions: SerializerOptions = {}) {
@@ -74,7 +75,8 @@ export class Serializer {
       let realmPreludeGenerator = realm.preludeGenerator;
       invariant(realmPreludeGenerator);
       let forbiddenNames = realmPreludeGenerator.nameGenerator.forbiddenNames;
-      traverseFast(ast, null, node => {
+      traverseFast(ast, null, (node, parentNode) => {
+        if (parentNode !== null) realm.astNodeParents.set(node, parentNode);
         if (!t.isIdentifier(node)) return false;
 
         forbiddenNames.add(((node: any): BabelNodeIdentifier).name);
@@ -155,6 +157,7 @@ export class Serializer {
           reactStatistics = new ReactStatistics();
           this.functions.optimizeReactComponentTreeRoots(reactStatistics);
         });
+        stripDeadReactElementNodes(this.realm);
       }
 
       statistics.processCollectedNestedOptimizedFunctions.measure(() =>

@@ -194,6 +194,7 @@ export class Reconciler {
         `react component: ${getComponentName(this.realm, componentType)}`,
         (sideEffectType, binding, expressionLocation) => {
           if (this.realm.react.failOnUnsupportedSideEffects) {
+            return;
             handleReportedSideEffect(throwUnsupportedSideEffectError, sideEffectType, binding, expressionLocation);
           }
         }
@@ -295,11 +296,12 @@ export class Reconciler {
     componentType: ECMAScriptSourceFunctionValue | BoundFunctionValue,
     props: ObjectValue | AbstractObjectValue,
     context: ObjectValue | AbstractObjectValue,
-    evaluatedNode: ReactEvaluatedNode
+    evaluatedNode: ReactEvaluatedNode,
+    branchStatus: BranchStatusEnum
   ) {
     // We also assume that context is not used for this outlining approach
     if (componentType instanceof ECMAScriptSourceFunctionValue) {
-      return getValueFromOutlinedFunctionComponent(this.realm, componentType, [props]);
+      return getValueFromOutlinedFunctionComponent(this.realm, componentType, [props], branchStatus === "ROOT");
     }
     return getValueFromFunctionCall(this.realm, componentType, this.realm.intrinsics.undefined, [props, context]);
   }
@@ -735,7 +737,7 @@ export class Reconciler {
         value = this._resolveClassComponent(componentType, props, context, branchStatus, evaluatedNode);
       }
     } else {
-      value = this._resolveFunctionalComponent(componentType, props, context, evaluatedNode);
+      value = this._resolveFunctionalComponent(componentType, props, context, evaluatedNode, branchStatus);
       if (valueIsFactoryClassComponent(this.realm, value)) {
         invariant(value instanceof ObjectValue);
         if (branchStatus !== "ROOT") {

@@ -67,7 +67,7 @@ import { isReactElement, isReactPropsObject, valueIsReactLibraryObject } from ".
 import { ResidualReactElementVisitor } from "./ResidualReactElementVisitor.js";
 import { GeneratorTree } from "./GeneratorTree.js";
 import { PropertyDescriptor, AbstractJoinedDescriptor } from "../descriptors.js";
-import { flagFunctionForHoistingIfPossible } from "../react/hoisting.js";
+import { flagFunctionForHoistingIfPossible, canHoistFunction } from "../react/hoisting.js";
 
 type BindingState = {|
   capturedBindings: Set<ResidualFunctionBinding>,
@@ -635,7 +635,7 @@ export class ResidualHeapVisitor {
     }
   }
 
-  _visitBindingHelper(residualFunctionBinding: ResidualFunctionBinding) {
+  _visitBindingHelper(residualFunctionBinding: ResidualFunctionBinding, inHoistedFunction: boolean) {
     if (residualFunctionBinding.hasLeaked) return;
     let environment = residualFunctionBinding.declarativeEnvironmentRecord;
     invariant(environment !== null);
@@ -648,11 +648,23 @@ export class ResidualHeapVisitor {
       invariant(!binding.deletable);
       let value = (binding.initialized && binding.value) || this.realm.intrinsics.undefined;
       if (value !== this.realm.intrinsics.__leakedValue) {
-        residualFunctionBinding.value = this.visitEquivalentValue(value);
+        if (inHoistedFunction) {
+          this._withScope(this.globalGenerator, () => {
+            residualFunctionBinding.value = this.visitEquivalentValue(value);
+          });
+        } else {
+          residualFunctionBinding.value = this.visitEquivalentValue(value);
+        }
       }
     } else if (residualFunctionBinding.value !== this.realm.intrinsics.__leakedValue) {
       // Subsequently, we just need to visit the value.
-      this.visitValue(residualFunctionBinding.value);
+      if (inHoistedFunction) {
+        this._withScope(this.globalGenerator, () => {
+          this.visitValue(residualFunctionBinding.value);
+        });
+      } else {
+        this.visitValue(residualFunctionBinding.value);
+      }
     }
   }
 
@@ -669,7 +681,11 @@ export class ResidualHeapVisitor {
     if (environment === null) return;
     invariant(this.scope === scope);
 
+    let inHoistedFunction = canHoistFunction(this.realm, scope);
     let refScope = this._getAdditionalFunctionOfScope() || "GLOBAL";
+    if (inHoistedFunction) {
+      refScope = "GLOBAL";
+    }
     residualFunctionBinding.potentialReferentializationScopes.add(refScope);
     invariant(!(refScope instanceof Generator));
     let funcToScopes = getOrDefault(this.functionToCapturedScopes, refScope, () => new Map());
@@ -682,14 +698,17 @@ export class ResidualHeapVisitor {
     // If the binding is new for this bindingState, have all functions capturing bindings from that scope visit it
     if (!bindingState.capturedBindings.has(residualFunctionBinding)) {
       for (let capturingScope of bindingState.capturingScopes) {
-        this._enqueueWithUnrelatedScope(capturingScope, () => this._visitBindingHelper(residualFunctionBinding));
+        this._enqueueWithUnrelatedScope(capturingScope, () =>
+          this._visitBindingHelper(residualFunctionBinding, inHoistedFunction)
+        );
       }
       bindingState.capturedBindings.add(residualFunctionBinding);
     }
     // If the function is new for this bindingState, visit all existent bindings in this scope
     if (!bindingState.capturingScopes.has(scope)) {
       invariant(this.scope === scope);
-      for (let residualBinding of bindingState.capturedBindings) this._visitBindingHelper(residualBinding);
+      for (let residualBinding of bindingState.capturedBindings)
+        this._visitBindingHelper(residualBinding, inHoistedFunction);
       bindingState.capturingScopes.add(scope);
     }
   }

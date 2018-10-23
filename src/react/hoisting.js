@@ -105,7 +105,7 @@ export function flagFunctionForHoistingIfPossible(
     if (func instanceof ECMAScriptSourceFunctionValue) {
       let code = func.$ECMAScriptCode;
       let functionInfos = residualHeapVisitor.functionInfos.get(code);
-      if (functionInfos && functionInfos.unbound.size > 0) {
+      if (functionInfos && functionInfos.unbound.size > 0 && !func.$Environment.destroyed) {
         return;
       }
     }
@@ -113,12 +113,7 @@ export function flagFunctionForHoistingIfPossible(
   }
 }
 
-export function canHoistFunction(
-  realm: Realm,
-  func: FunctionValue,
-  residualHeapVisitor?: ResidualHeapVisitor,
-  visitedValues: Set<Value>
-): boolean {
+export function canHoistFunction(realm: Realm, func: FunctionValue): boolean {
   return realm.react.hoistableFunctions.has(func);
 }
 
