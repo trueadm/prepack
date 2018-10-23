@@ -10,10 +10,12 @@
 /* @flow */
 
 import { Realm } from "../realm.js";
+import { DeclarativeEnvironmentRecord, LexicalEnvironment } from "../environment.js";
 import { AbruptCompletion, JoinedNormalAndAbruptCompletions, SimpleNormalCompletion } from "../completions.js";
 import {
   AbstractValue,
   ArrayValue,
+  BoundFunctionValue,
   ConcreteValue,
   ECMAScriptSourceFunctionValue,
   FunctionValue,
@@ -39,6 +41,44 @@ import { getInitialProps } from "./components.js";
 import traverseFast from "../utils/traverse-fast.js";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
+
+function collectRuntimeValuesFromFunctionValue(
+  realm: Realm,
+  val: ECMAScriptSourceFunctionValue,
+  runtimeValues: Set<Value>,
+  effects: Effects
+) {
+  let bindings = new Set();
+  let body = val.$ECMAScriptCode;
+  let params = val.$FormalParameters;
+
+  traverse(
+    t.file(t.program([t.expressionStatement(t.functionExpression(null, params, body))])),
+    FunctionClosureRefVisitor,
+    null,
+    bindings
+  );
+  traverse.cache.clear();
+  // Find all bindings
+  let env = val.$Environment;
+  while (env !== null) {
+    let envRec = env.environmentRecord;
+
+    if (envRec instanceof DeclarativeEnvironmentRecord) {
+      let envBindings = envRec.bindings;
+
+      for (let envBindingName of Object.keys(envBindings)) {
+        if (bindings.has(envBindingName)) {
+          let binding = envBindings[envBindingName];
+          if (binding !== null && binding.value !== undefined) {
+            collectRuntimeValuesFromValue(realm, binding.value, runtimeValues, effects);
+          }
+        }
+      }
+    }
+    env = env.parent;
+  }
+}
 
 function collectRuntimeValuesFromConcreteValue(
   realm: Realm,
@@ -66,9 +106,29 @@ function collectRuntimeValuesFromConcreteValue(
       }
     }
     if (val instanceof FunctionValue) {
-      invariant(false, "TODO");
+      collectRuntimeValuesFromFunctionValue(realm, val, runtimeValues, effects);
     } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
-      invariant(false, "TODO");
+      // If this is needed for render phase, we can re-model it to some degree.
+      if (val.nestedOptimizedFunctionEffects !== undefined && val.nestedOptimizedFunctionEffects.size > 0) {
+        let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+        invariant(temporalOperationEntry !== undefined);
+        let { args, operationDescriptor } = temporalOperationEntry;
+        if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
+          let [arr, methodProperty, callbackfn] = args;
+          // For now we only support nested optimized functions on map and filter
+          if (methodProperty.value === "map" || methodProperty.value === "filter") {
+            collectRuntimeValuesFromFunctionValue(realm, callbackfn, runtimeValues, effects);
+            // First arg is the referencing array
+            if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arr)) {
+              runtimeValues.add(arr);
+            } else {
+              invariant(false, "TODO");
+            }
+            return;
+          }
+        }
+      }
+      runtimeValues.add(val);
     } else {
       invariant(
         val.$Prototype === realm.intrinsics.ObjectPrototype || val.$Prototype === realm.intrinsics.ArrayPrototype
@@ -191,6 +251,106 @@ function cloneAndModelObjectPropertyDescriptor(
   return clonedDesc;
 }
 
+function visitName(path: BabelTraversePath, bindings: Set<string>, name: string, read: boolean, write: boolean): void {
+  // Is the name bound to some local identifier? If so, we don't need to do anything
+  if (path.scope.hasBinding(name, /*noGlobals*/ true)) return;
+
+  // Otherwise, let's record that there's an unbound identifier
+  if (read) bindings.add(name);
+  if (write) bindings.add(name);
+}
+
+const FunctionClosureRefVisitor = {
+  ReferencedIdentifier(path: BabelTraversePath, bindings: Set<string>): void {
+    let innerName = path.node.name;
+    if (innerName === "arguments") {
+      bindings.usesArguments = true;
+      return;
+    }
+    visitName(path, bindings, innerName, true, false);
+  },
+  "AssignmentExpression|UpdateExpression"(path: BabelTraversePath, bindings: Set<string>): void {
+    let doesRead = path.node.operator !== "=";
+    for (let name in path.getBindingIdentifiers()) {
+      visitName(path, bindings, name, doesRead, true);
+    }
+  },
+};
+
+function getBinding(bindingName: string, originalEnv: LexicalEnvironment): null | Binding {
+  let env = originalEnv;
+
+  while (env !== null) {
+    let envRec = env.environmentRecord;
+
+    if (envRec instanceof DeclarativeEnvironmentRecord) {
+      let envBindings = envRec.bindings;
+
+      if (envBindings[bindingName]) {
+        return envBindings[bindingName];
+      }
+    }
+    env = env.parent;
+  }
+  return null;
+}
+
+function cloneAndModelFunctionScopeForBindings(
+  realm: Realm,
+  scope: LexicalEnvironment,
+  bindings: Set<string>,
+  runtimeValuesMapping: Map<Value, string>,
+  effects: Effects
+) {
+  let env = new LexicalEnvironment(realm);
+  let dclRec = new DeclarativeEnvironmentRecord(realm);
+  dclRec.creatingOptimizedFunction = scope.environmentRecord.creatingOptimizedFunction;
+  dclRec.lexicalEnvironment = env;
+  env.environmentRecord = dclRec;
+  if (bindings.size > 0) {
+    for (let bindingName of bindings) {
+      let binding = getBinding(bindingName, scope);
+      // If the binding is null then it's in global scope so we don't need to clone
+      if (binding !== null && binding.value !== undefined) {
+        let clonedBinding = Object.assign({}, binding);
+        clonedBinding.environment = dclRec;
+        clonedBinding.value = cloneAndModelValue(realm, binding.value, runtimeValuesMapping, effects);
+        dclRec.bindings[bindingName] = clonedBinding;
+      }
+    }
+  }
+  env.parent = scope.parent;
+  return env;
+}
+
+function cloneAndModelFunctionValue(
+  realm: Realm,
+  val: ECMAScriptSourceFunctionValue,
+  runtimeValuesMapping: Map<Value, string>,
+  effects: Effects
+): ECMAScriptSourceFunctionValue {
+  let bindings = new Set();
+  let body = val.$ECMAScriptCode;
+  let params = val.$FormalParameters;
+
+  traverse(
+    t.file(t.program([t.expressionStatement(t.functionExpression(null, params, body))])),
+    FunctionClosureRefVisitor,
+    null,
+    bindings
+  );
+  traverse.cache.clear();
+  let clonedScope = cloneAndModelFunctionScopeForBindings(
+    realm,
+    val.$Environment,
+    bindings,
+    runtimeValuesMapping,
+    effects
+  );
+  let clonedFunction = Functions.FunctionCreate(realm, val.$FunctionKind, params, body, clonedScope, val.$Strict);
+  return clonedFunction;
+}
+
 function cloneObjectProperties(
   realm: Realm,
   clonedObject: ObjectValue,
@@ -243,6 +403,40 @@ function cloneObjectProperties(
   }
 }
 
+function cloneAndModelArrayWithNumericWidenedProperty(
+  realm: Realm,
+  val: ArrayValue,
+  runtimeValuesMapping: Map<Value, string>,
+  effects: Effects
+) {
+  let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+  invariant(temporalOperationEntry !== undefined);
+  let { args, operationDescriptor } = temporalOperationEntry;
+  let clonedArgs = args.map(arg => cloneAndModelValue(realm, arg, runtimeValuesMapping, effects));
+  if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
+    let possibleNestedOptimizedFunctions;
+    let [, methodProperty, callbackfn] = clonedArgs;
+    invariant(methodProperty instanceof StringValue);
+    // For now we only support nested optimized functions on map and filter
+    if (methodProperty.value === "map" || methodProperty.value === "filter") {
+      possibleNestedOptimizedFunctions = [
+        {
+          func: callbackfn,
+          thisValue: realm.intrinsics.undefined,
+          kind: methodProperty.value,
+        },
+      ];
+    }
+    return ArrayValue.createTemporalWithWidenedNumericProperty(
+      realm,
+      clonedArgs,
+      createOperationDescriptor("UNKNOWN_ARRAY_METHOD_PROPERTY_CALL"),
+      possibleNestedOptimizedFunctions
+    );
+  }
+  invariant(false, "TODO");
+}
+
 function cloneAndModelObjectValue(
   realm: Realm,
   val: ObjectValue,
@@ -253,13 +447,20 @@ function cloneAndModelObjectValue(
     return val;
   }
   if (val instanceof ArrayValue) {
+    if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+      return cloneAndModelArrayWithNumericWidenedProperty(realm, val, runtimeValuesMapping, effects);
+    }
     invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
     let clonedObject = new ArrayValue(realm);
     cloneObjectProperties(realm, clonedObject, val, runtimeValuesMapping, effects);
     applyPostValueConfig(realm, val, clonedObject);
     return clonedObject;
   } else if (val instanceof FunctionValue) {
-    debugger;
+    if (val instanceof BoundFunctionValue) {
+      invariant(false, "TODO");
+    }
+    invariant(val instanceof ECMAScriptSourceFunctionValue);
+    return cloneAndModelFunctionValue(realm, val, runtimeValuesMapping, effects);
   }
   invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
   let clonedObject = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
@@ -360,6 +561,8 @@ function cloneAndModelAbstractValue(
         let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
         let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
         return AbstractValue.createFromLogicalOp(realm, val.kind, clonedLeftValue, clonedRightValue);
+      case "widened numeric property":
+        return AbstractValue.createFromType(realm, Value, "widened numeric property", [...val.args]);
       default:
         invariant(false, "TODO");
     }
@@ -425,6 +628,14 @@ function applyBabelTransformOnAstNode(realm: Realm, astNode: BabelNode): void {
     }
   } else if (t.isLogicalExpression(astNodeParent)) {
     applyBabelTransformOnAstNode(realm, astNodeParent);
+  } else if (t.isConditionalExpression(astNodeParent)) {
+    if (astNodeParent.test === astNode) {
+      astNodeParent.test = wrapBabelNodeInTransform(astNode);
+    } else if (astNodeParent.consequent === astNode) {
+      astNodeParent.consequent = wrapBabelNodeInTransform(astNode);
+    } else {
+      astNodeParent.alternate = wrapBabelNodeInTransform(astNode);
+    }
   } else {
     invariant(false, "TODO");
   }
@@ -686,6 +897,9 @@ function collectNodes(node, dynamicNodes) {
 function createNewNode(path, node) {
   const dynamicNodes = [];
   collectNodes(node, dynamicNodes);
+  if (dynamicNodes.length === 0) {
+    return t.emptyStatement();
+  }
   return t.sequenceExpression(dynamicNodes);
 }
 

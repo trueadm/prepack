@@ -1157,6 +1157,9 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
         return isTemporalValueDeeplyReferencingPropsObject(realm, args[0]);
       case "CALL_BAILOUT":
         return false;
+      case "BINARY_EXPRESSION":
+        // TODO: we might be able to handle this?
+        return false;
       default:
         invariant(false, "TODO");
     }
