@@ -35,7 +35,7 @@ export default function(
       plugins.push("flow");
     }
     let ast = parse(code, { filename, sourceType, startLine, plugins });
-    traverseFast(ast, node => {
+    traverseFast(ast, null, node => {
       invariant(node.loc);
       node.loc.source = filename;
       return false;

@@ -28,6 +28,10 @@ export class ReactPropsSet {
     let currentMap = reactEquivalenceSet.reactPropsRoot;
     let result;
 
+    // Bail-out of matching root props objects
+    if (props.isIntrinsic() && props.intrinsicName === "props") {
+      return props;
+    }
     for (let [propName] of props.properties) {
       currentMap = reactEquivalenceSet.getKey(propName, currentMap, visitedValues);
       result = reactEquivalenceSet.getEquivalentPropertyValue(props, propName, currentMap, visitedValues);

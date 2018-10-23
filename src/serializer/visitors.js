@@ -28,6 +28,7 @@ export type ClosureRefVisitorState = {
 function visitName(path, state, node, modified) {
   // Is the name bound to some local identifier? If so, we don't need to do anything
   if (path.scope.hasBinding(node.name, /*noGlobals*/ true)) return;
+  if (node.name === "__rv" || node.name === "__ri") return;
 
   // Otherwise, let's record that there's an unbound identifier
   let nodes = state.functionInfo.unbound.get(node.name);

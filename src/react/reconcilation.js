@@ -78,6 +78,7 @@ import type { ClassComponentMetadata, ReactComponentTreeConfig, ReactHint } from
 import { handleReportedSideEffect } from "../serializer/utils.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { PropertyDescriptor } from "../descriptors.js";
+import { getValueFromOutlinedFunctionComponent } from "./outlining.js";
 
 type ComponentResolutionStrategy =
   | "NORMAL"
@@ -296,6 +297,10 @@ export class Reconciler {
     context: ObjectValue | AbstractObjectValue,
     evaluatedNode: ReactEvaluatedNode
   ) {
+    // We also assume that context is not used for this outlining approach
+    if (componentType instanceof ECMAScriptSourceFunctionValue) {
+      return getValueFromOutlinedFunctionComponent(this.realm, componentType, [props]);
+    }
     return getValueFromFunctionCall(this.realm, componentType, this.realm.intrinsics.undefined, [props, context]);
   }
 

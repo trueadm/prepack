@@ -295,6 +295,8 @@ export class Realm {
     this.moduleFactoryFunctionsToRemove = new Map();
     this.tracers = [];
 
+    this.astNodeParents = new Map();
+
     // These get initialized in construct_realm to avoid the dependency
     this.intrinsics = ({}: any);
     this.$GlobalObject = (({}: any): ObjectValue);
@@ -313,13 +315,15 @@ export class Realm {
       abstractHints: new WeakMap(),
       activeReconciler: undefined,
       classComponentMetadata: new Map(),
+      clonedOutlinedFunctions: new Map(),
       currentOwner: undefined,
+      declaredOutlinedValuesArray: false,
       defaultPropsHelper: undefined,
       emptyArray: undefined,
       emptyObject: undefined,
       enabled: opts.reactEnabled || false,
       failOnUnsupportedSideEffects: opts.reactFailOnUnsupportedSideEffects === false ? false : true,
-      hoistableFunctions: new WeakMap(),
+      hoistableFunctions: new WeakSet(),
       hoistableReactElements: new WeakMap(),
       noopFunction: undefined,
       optimizeNestedFunctions: opts.reactOptimizeNestedFunctions || false,
@@ -329,6 +333,7 @@ export class Realm {
       reactElementStringTypeReferences: new Map(),
       reactProps: new WeakSet(),
       symbols: new Map(),
+      usedOutlinedValuesArray: false,
       usedReactElementKeys: new Set(),
       verbose: opts.reactVerbose || false,
     };
@@ -390,11 +395,14 @@ export class Realm {
 
   activeLexicalEnvironments: Set<LexicalEnvironment>;
 
+  astNodeParents: Map<BabelNode, BabelNode>;
+
   // A set of abstract conditions that are known to be true in the current execution path.
   // For example, the abstract condition of an if statement is known to be true inside its true branch.
   pathConditions: PathConditions;
 
   currentLocation: ?BabelNodeSourceLocation;
+  currentAstNode: ?BabelNode;
   nextContextLocation: ?BabelNodeSourceLocation;
   contextStack: Array<ExecutionContext> = [];
   $GlobalEnv: LexicalEnvironment;
@@ -416,13 +424,15 @@ export class Realm {
     abstractHints: WeakMap<AbstractValue | ObjectValue, ReactHint>,
     activeReconciler: any, // inentionally "any", importing the React reconciler class increases Flow's cylic count
     classComponentMetadata: Map<ECMAScriptSourceFunctionValue | BoundFunctionValue, ClassComponentMetadata>,
+    clonedOutlinedFunctions: Map<ECMAScriptSourceFunctionValue, ECMAScriptSourceFunctionValue>,
     currentOwner?: ObjectValue,
+    declaredOutlinedValuesArray: boolean,
     defaultPropsHelper?: ECMAScriptSourceFunctionValue,
     emptyArray: void | ArrayValue,
     emptyObject: void | ObjectValue,
     enabled: boolean,
     failOnUnsupportedSideEffects: boolean,
-    hoistableFunctions: WeakMap<FunctionValue, boolean>,
+    hoistableFunctions: WeakSet<FunctionValue>,
     hoistableReactElements: WeakMap<ObjectValue, boolean>,
     noopFunction: void | ECMAScriptSourceFunctionValue,
     optimizeNestedFunctions: boolean,
@@ -432,6 +442,7 @@ export class Realm {
     reactElementStringTypeReferences: Map<string, AbstractValue>,
     reactProps: WeakSet<ObjectValue>,
     symbols: Map<ReactSymbolTypes, SymbolValue>,
+    usedOutlinedValuesArray: boolean,
     usedReactElementKeys: Set<string>,
     verbose: boolean,
   };

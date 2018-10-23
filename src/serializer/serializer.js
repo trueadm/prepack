@@ -74,7 +74,7 @@ export class Serializer {
       let realmPreludeGenerator = realm.preludeGenerator;
       invariant(realmPreludeGenerator);
       let forbiddenNames = realmPreludeGenerator.nameGenerator.forbiddenNames;
-      traverseFast(ast, node => {
+      traverseFast(ast, null, node => {
         if (!t.isIdentifier(node)) return false;
 
         forbiddenNames.add(((node: any): BabelNodeIdentifier).name);

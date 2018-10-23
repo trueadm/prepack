@@ -169,7 +169,7 @@ export class ResidualFunctionInitializers {
           // TODO #885: Study in more detail which threshold is the best compromise in terms of
           // code size and performance.
           let count = 0;
-          traverseFast(t.file(t.program([ast])), node => {
+          traverseFast(t.file(t.program([ast])), null, node => {
             count++;
             return false;
           });

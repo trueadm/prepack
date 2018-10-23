@@ -77,19 +77,12 @@ function canHoistArray(
   return true;
 }
 
-export function canHoistFunction(
+export function flagFunctionForHoistingIfPossible(
   realm: Realm,
   func: FunctionValue,
-  residualHeapVisitor?: ResidualHeapVisitor,
-  visitedValues: Set<Value>
-): boolean {
-  if (realm.react.hoistableFunctions.has(func)) {
-    // cast because Flow thinks that we may have set a value to be something other than a boolean?
-    return ((realm.react.hoistableFunctions.get(func): any): boolean);
-  }
-  if (residualHeapVisitor === undefined) {
-    return false;
-  }
+  residualHeapVisitor: ResidualHeapVisitor,
+  visitedValues?: Set<Value> = new Set()
+): void {
   // get the function instance
   let functionInstance = residualHeapVisitor.functionInstances.get(func);
   // we can safely hoist the function if the residual bindings hoistable too
@@ -101,11 +94,11 @@ export function canHoistFunction(
       // so we can assume that we can still hoist this function
       if (declarativeEnvironmentRecord !== null) {
         if (value === undefined) {
-          return false;
+          return;
         }
         invariant(value instanceof Value);
         if (!canHoistValue(realm, value, residualHeapVisitor, visitedValues)) {
-          return false;
+          return;
         }
       }
     }
@@ -113,14 +106,20 @@ export function canHoistFunction(
       let code = func.$ECMAScriptCode;
       let functionInfos = residualHeapVisitor.functionInfos.get(code);
       if (functionInfos && functionInfos.unbound.size > 0) {
-        return false;
+        return;
       }
     }
-    realm.react.hoistableFunctions.set(func, true);
-    return true;
+    realm.react.hoistableFunctions.add(func);
   }
-  realm.react.hoistableFunctions.set(func, false);
-  return false;
+}
+
+export function canHoistFunction(
+  realm: Realm,
+  func: FunctionValue,
+  residualHeapVisitor?: ResidualHeapVisitor,
+  visitedValues: Set<Value>
+): boolean {
+  return realm.react.hoistableFunctions.has(func);
 }
 
 function canHoistAbstract(realm: Realm, abstract: AbstractValue, residualHeapVisitor: ResidualHeapVisitor): boolean {

@@ -1141,3 +1141,26 @@ export function hardModifyReactObjectPropertyBinding(
   });
   object.properties.set(propName, newBinding);
 }
+
+export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: Value): boolean {
+  if (realm.react.propsWithNoPartialKeyOrRef.has(val) || realm.react.reactProps.has(val)) {
+    return true;
+  }
+  if (val instanceof AbstractValue && val.isTemporal()) {
+    let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+    invariant(temporalOperationEntry !== undefined);
+    let { args, operationDescriptor } = temporalOperationEntry;
+    switch (operationDescriptor.type) {
+      case "ABSTRACT_PROPERTY":
+      case "ABSTRACT_OBJECT_GET":
+        // First arg is the parent object/abstract
+        return isTemporalValueDeeplyReferencingPropsObject(realm, args[0]);
+      case "CALL_BAILOUT":
+        return false;
+      default:
+        debugger;
+        return false;
+    }
+  }
+  return false;
+}

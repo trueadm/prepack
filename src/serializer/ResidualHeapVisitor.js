@@ -67,6 +67,7 @@ import { isReactElement, isReactPropsObject, valueIsReactLibraryObject } from ".
 import { ResidualReactElementVisitor } from "./ResidualReactElementVisitor.js";
 import { GeneratorTree } from "./GeneratorTree.js";
 import { PropertyDescriptor, AbstractJoinedDescriptor } from "../descriptors.js";
+import { flagFunctionForHoistingIfPossible } from "../react/hoisting.js";
 
 type BindingState = {|
   capturedBindings: Set<ResidualFunctionBinding>,
@@ -610,6 +611,7 @@ export class ResidualHeapVisitor {
           );
         }
       }
+      flagFunctionForHoistingIfPossible(this.realm, val, this);
     }
 
     let additionalFunctionEffects = this.additionalFunctionValuesAndEffects.get(val);

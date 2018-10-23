@@ -17,13 +17,13 @@ import * as t from "@babel/types";
 // This version...
 // - takes a callback function that returns a boolean to indicate whether to short-circuit the traversal
 // - doesn't pass around or allocate an optional parameter value to the callback.
-export default function traverse(node: BabelNode, enter: BabelNode => boolean) {
+export default function traverse(node: BabelNode, parentNode: null | BabelNode, enter: BabelNode => boolean) {
   if (!node) return;
 
   let keys = t.VISITOR_KEYS[node.type];
   if (!keys) return;
 
-  let stop = enter(node);
+  let stop = enter(node, parentNode);
   if (stop) return;
 
   for (let key of keys) {
@@ -31,10 +31,10 @@ export default function traverse(node: BabelNode, enter: BabelNode => boolean) {
 
     if (Array.isArray(subNode)) {
       for (let elementNode of subNode) {
-        traverse(elementNode, enter);
+        traverse(elementNode, node, enter);
       }
     } else {
-      traverse(subNode, enter);
+      traverse(subNode, node, enter);
     }
   }
 }

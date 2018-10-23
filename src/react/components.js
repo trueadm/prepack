@@ -85,6 +85,11 @@ export function getInitialProps(
   invariant(abstractPropsObject instanceof AbstractObjectValue);
   flagPropsWithNoPartialKeyOrRef(realm, abstractPropsObject);
   abstractPropsObject.makeFinal();
+  for (let element of abstractPropsObject.values.getElements()) {
+    element.makeFinal();
+    flagPropsWithNoPartialKeyOrRef(realm, element);
+    realm.react.reactProps.add(element);
+  }
   return abstractPropsObject;
 }
 

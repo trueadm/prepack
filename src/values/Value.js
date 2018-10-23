@@ -9,7 +9,7 @@
 
 /* @flow */
 
-import type { BabelNodeSourceLocation } from "@babel/types";
+import type { BabelNode, BabelNodeSourceLocation } from "@babel/types";
 import type { Realm } from "../realm.js";
 import {
   AbstractObjectValue,
@@ -31,6 +31,7 @@ export default class Value {
     this.$Realm = realm;
     this.intrinsicName = intrinsicName;
     this.expressionLocation = realm.currentLocation;
+    this.astNode = realm.currentAstNode;
   }
   // Name from original source if existant
   __originalName: void | string;
@@ -61,6 +62,7 @@ export default class Value {
 
   // The source location of the expression that first produced this value.
   expressionLocation: ?BabelNodeSourceLocation;
+  astNode: ?BabelNode;
   $Realm: Realm;
 
   // this => val. A false value does not imply that !(this => val).

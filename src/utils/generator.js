@@ -115,6 +115,10 @@ export type OperationDescriptorType =
   | "REACT_CREATE_CONTEXT_PROVIDER"
   | "REACT_DEFAULT_PROPS_HELPER"
   | "REACT_NATIVE_STRING_LITERAL"
+  | "REACT_OUTLINING_CLEAR_REACT_VALUES"
+  | "REACT_OUTLINING_DEDCLARE_REACT_VALUES"
+  | "REACT_OUTLINING_ORIGINAL_FUNC_CALL"
+  | "REACT_OUTLINING_REFERENCE_REACT_VALUES"
   | "REACT_RELAY_MOCK_CONTAINER"
   | "REACT_SSR_PREV_TEXT_NODE"
   | "REACT_SSR_REGEX_CONSTANT"
@@ -1018,12 +1022,15 @@ export class Generator {
     );
   }
 
-  emitStatement(args: Array<Value>, operationDescriptor: OperationDescriptor): void {
+  emitStatement(args: Array<Value>, operationDescriptor: OperationDescriptor, emitAtStart?: boolean = false): void {
     invariant(typeof operationDescriptor !== "function");
-    this._addEntry({
-      args,
-      operationDescriptor,
-    });
+    this._addEntry(
+      {
+        args,
+        operationDescriptor,
+      },
+      emitAtStart
+    );
   }
 
   emitVoidExpression(
@@ -1146,6 +1153,11 @@ export class Generator {
   }
 
   serialize(context: SerializationContext): void {
+    let react = this.realm.react;
+    if (this._name === "main" && react.usedOutlinedValuesArray && !react.declaredOutlinedValuesArray) {
+      react.declaredOutlinedValuesArray = true;
+      this.emitStatement([], createOperationDescriptor("REACT_OUTLINING_DEDCLARE_REACT_VALUES"), true);
+    }
     let serializeFn = () => {
       context.initGenerator(this);
       for (let entry of this._entries) entry.serialize(context);
@@ -1168,7 +1180,7 @@ export class Generator {
     return res;
   }
 
-  _addEntry(entryArgs: TemporalOperationEntryArgs): TemporalOperationEntry {
+  _addEntry(entryArgs: TemporalOperationEntryArgs, emitAtStart?: boolean = false): TemporalOperationEntry {
     let entry;
     let operationDescriptor = entryArgs.operationDescriptor;
     if (operationDescriptor && operationDescriptor.type === "OBJECT_ASSIGN") {
@@ -1177,7 +1189,11 @@ export class Generator {
       entry = new TemporalOperationEntry(this.realm, entryArgs);
     }
     this.realm.saveTemporalGeneratorEntryArgs(entry);
-    this._entries.push(entry);
+    if (emitAtStart) {
+      this._entries.unshift(entry);
+    } else {
+      this._entries.push(entry);
+    }
     return entry;
   }
 

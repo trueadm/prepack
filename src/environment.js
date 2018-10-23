@@ -1251,7 +1251,7 @@ export class LexicalEnvironment {
     const positionInfos = new Map();
 
     const smc = new SourceMapConsumer(map);
-    traverseFast(ast, node => {
+    traverseFast(ast, null, node => {
       fixupLocation(node.loc);
       fixupComments(node.leadingComments);
       fixupComments(node.innerComments);
@@ -1337,7 +1337,7 @@ export class LexicalEnvironment {
   }
 
   fixupFilenames(ast: BabelNode): void {
-    traverseFast(ast, node => {
+    traverseFast(ast, null, node => {
       let loc = node.loc;
       if (loc && loc.source) (loc: any).filename = loc.source;
       else node.loc = null;
@@ -1374,6 +1374,7 @@ export class LexicalEnvironment {
 
   evaluateAbstract(ast: BabelNode, strictCode: boolean, metadata?: any): Value | Reference {
     this.realm.currentLocation = ast.loc;
+    this.realm.currentAstNode = ast;
     this.realm.testTimeout();
 
     let evaluator = this.realm.evaluators[(ast.type: string)];

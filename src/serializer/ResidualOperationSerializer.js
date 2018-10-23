@@ -155,6 +155,22 @@ export class ResidualOperationSerializer {
         break;
 
       // React
+      case "REACT_OUTLINING_CLEAR_REACT_VALUES":
+        return t.expressionStatement(
+          t.sequenceExpression([
+            t.assignmentExpression("=", t.identifier("__rv"), t.arrayExpression([])),
+            t.assignmentExpression("=", t.identifier("__ri"), t.numericLiteral(0)),
+          ])
+        );
+      case "REACT_OUTLINING_DEDCLARE_REACT_VALUES":
+        return t.variableDeclaration("var", [
+          t.variableDeclarator(t.identifier("__rv")),
+          t.variableDeclarator(t.identifier("__ri")),
+        ]);
+      case "REACT_OUTLINING_ORIGINAL_FUNC_CALL":
+        return this._serializeReactOutliningOriginalFuncCall(nodes);
+      case "REACT_OUTLINING_REFERENCE_REACT_VALUES":
+        return this._serializeReactOutliningReferenceReactValues(nodes);
       case "REACT_SSR_REGEX_CONSTANT":
         return t.variableDeclaration("var", [
           t.variableDeclarator(t.identifier("matchHtmlRegExp"), t.regExpLiteral("[\"'&<>]")),
@@ -358,6 +374,21 @@ export class ResidualOperationSerializer {
     }
 
     return babelNode;
+  }
+
+  _serializeReactOutliningReferenceReactValues(runtimeValuesNames: Array<BabelNodeExpression>): BabelNodeStatement {
+    return t.variableDeclaration("var", [
+      t.variableDeclarator(
+        t.arrayPattern(runtimeValuesNames.map(runtimeValuesName => t.identifier(runtimeValuesName.value))),
+        t.identifier("__rv")
+      ),
+    ]);
+  }
+
+  _serializeReactOutliningOriginalFuncCall([funcCall, ...args]: Array<BabelNodeExpression>): BabelNodeStatement {
+    return t.expressionStatement(
+      t.callExpression(funcCall, ((args: any): Array<BabelNodeExpression | BabelNodeSpreadElement>))
+    );
   }
 
   _serializeAssumeCall({  }: OperationDescriptorData, [c, s]: Array<BabelNodeExpression>): BabelNodeStatement {
