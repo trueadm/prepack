@@ -301,7 +301,7 @@ export class Reconciler {
   ) {
     // We also assume that context is not used for this outlining approach
     if (componentType instanceof ECMAScriptSourceFunctionValue) {
-      return getValueFromOutlinedFunctionComponent(this.realm, componentType, [props], branchStatus === "ROOT");
+      // return getValueFromOutlinedFunctionComponent(this.realm, componentType, [props], branchStatus === "ROOT");
     }
     return getValueFromFunctionCall(this.realm, componentType, this.realm.intrinsics.undefined, [props, context]);
   }

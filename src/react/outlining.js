@@ -99,6 +99,15 @@ function collectRuntimeValuesFromAbstractValue(
       return;
     }
     runtimeValues.add(val);
+  } else if (val.kind === "conditional") {
+    let [condValue, consequentVal, alternateVal] = val.args;
+    let condRuntimeValues = new Set();
+    collectRuntimeValuesFromValue(realm, condValue, condRuntimeValues, effects);
+    if (condRuntimeValues.size > 0) {
+      runtimeValues.add(condValue);
+    }
+    collectRuntimeValuesFromValue(realm, consequentVal, runtimeValues, effects);
+    collectRuntimeValuesFromValue(realm, alternateVal, runtimeValues, effects);
   } else if (val.args.length > 0) {
     for (let arg of val.args) {
       collectRuntimeValuesFromValue(realm, arg, runtimeValues, effects);
@@ -344,6 +353,13 @@ function cloneAndModelAbstractValue(
         let hasPrefix = val.operationDescriptor.data.prefix;
         return AbstractValue.createFromUnaryOp(realm, val.kind, clonedCondValue, hasPrefix);
       }
+      case "||":
+      case "&&":
+        // Logical ops
+        let [leftValue, rightValue] = val.args;
+        let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
+        let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
+        return AbstractValue.createFromLogicalOp(realm, val.kind, clonedLeftValue, clonedRightValue);
       default:
         invariant(false, "TODO");
     }
@@ -383,22 +399,14 @@ function wrapBabelNodeInTransform(astNode: BabelNode) {
   );
 }
 
-function applyBabelTransformOnAstNode(realm: Realm, astNode: BabelNode, foundNodeToWrap?: boolean = false): void {
+function applyBabelTransformOnAstNode(realm: Realm, astNode: BabelNode): void {
   let astNodeParent = realm.astNodeParents.get(astNode);
   invariant(astNodeParent !== undefined);
 
   if (t.isMemberExpression(astNodeParent)) {
-    applyBabelTransformOnAstNode(realm, astNodeParent, foundNodeToWrap);
+    applyBabelTransformOnAstNode(realm, astNodeParent);
   } else if (t.isCallExpression(astNodeParent)) {
-    if (!foundNodeToWrap) {
-      applyBabelTransformOnAstNode(realm, astNodeParent, true);
-    } else {
-      if (astNodeParent.callee === astNode) {
-        astNodeParent.callee = wrapBabelNodeInTransform(astNode);
-      } else {
-        invariant(false, "TODO arguments");
-      }
-    }
+    applyBabelTransformOnAstNode(realm, astNodeParent);
   } else if (t.isJSXExpressionContainer(astNodeParent)) {
     astNodeParent.expression = wrapBabelNodeInTransform(astNode);
   } else if (t.isIfStatement(astNodeParent)) {
@@ -409,6 +417,14 @@ function applyBabelTransformOnAstNode(realm: Realm, astNode: BabelNode, foundNod
     } else {
       astNodeParent.alternate = wrapBabelNodeInTransform(astNode);
     }
+  } else if (t.isVariableDeclarator(astNodeParent)) {
+    if (astNodeParent.init === astNode) {
+      astNodeParent.init = wrapBabelNodeInTransform(astNode);
+    } else {
+      invariant(false, "TODO not possible to get here?");
+    }
+  } else if (t.isLogicalExpression(astNodeParent)) {
+    applyBabelTransformOnAstNode(realm, astNodeParent);
   } else {
     invariant(false, "TODO");
   }

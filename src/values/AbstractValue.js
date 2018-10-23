@@ -802,6 +802,7 @@ export default class AbstractValue extends Value {
     );
     result.kind = op;
     result.expressionLocation = loc;
+    result.astNode = operand.astNode;
     if (doNotSimplify) return result;
     return isCondition
       ? realm.simplifyAndRefineAbstractCondition(result)
