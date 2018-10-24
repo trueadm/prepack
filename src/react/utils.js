@@ -1158,6 +1158,7 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
       case "CALL_BAILOUT":
         return false;
       case "BINARY_EXPRESSION":
+      case "COERCE_TO_STRING":
         // TODO: we might be able to handle this?
         return false;
       default:
@@ -1181,7 +1182,7 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
 
 export function getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: Value): string {
   if (realm.react.propsWithNoPartialKeyOrRef.has(val) || realm.react.reactProps.has(val)) {
-    return val.intrinsicName;
+    return val.intrinsicName || "props";
   }
   if (val instanceof AbstractValue && val.isTemporal()) {
     let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);

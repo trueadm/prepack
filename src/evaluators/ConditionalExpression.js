@@ -40,9 +40,14 @@ export default function(
   const alternate = ast.alternate;
   if (!exprValue.mightNotBeTrue()) return env.evaluate(consequent, strictCode);
   if (!exprValue.mightNotBeFalse()) return env.evaluate(alternate, strictCode);
-  return realm.evaluateWithAbstractConditional(
+  let conditional = realm.evaluateWithAbstractConditional(
     exprValue,
     () => realm.evaluateNodeForEffects(consequent, strictCode, env),
     () => (alternate ? realm.evaluateNodeForEffects(alternate, strictCode, env) : construct_empty_effects(realm))
   );
+  if (conditional instanceof AbstractValue && conditional.kind === "conditional") {
+    conditional.astNode = ast;
+    exprValue.astNode = ast.test;
+  }
+  return conditional;
 }

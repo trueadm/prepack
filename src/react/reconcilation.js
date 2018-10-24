@@ -303,6 +303,7 @@ export class Reconciler {
     if (componentType instanceof ECMAScriptSourceFunctionValue) {
       return getValueFromOutlinedFunctionComponent(this.realm, componentType, [props], branchStatus === "ROOT");
     }
+    debugger;
     return getValueFromFunctionCall(this.realm, componentType, this.realm.intrinsics.undefined, [props, context]);
   }
 

@@ -126,6 +126,7 @@ export default function(
     // Rather than look for this pattern everywhere, we override this behavior and replace the completion with
     // the actual logical operator. This helps with simplification and reasoning when dealing with path conditions.
     completion = AbstractValue.createFromLogicalOp(realm, ast.operator, lval, result2.value, ast.loc);
+    completion.astNode = ast;
   }
   return completion;
 }

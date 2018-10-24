@@ -52,6 +52,8 @@ import type { typeAnnotation } from "@babel/types";
 import { createOperationDescriptor } from "../utils/generator.js";
 import { Descriptor, PropertyDescriptor, type DescriptorInitializer, InternalSlotDescriptor } from "../descriptors.js";
 
+var i = 0;
+
 export default class ObjectValue extends ConcreteValue {
   constructor(
     realm: Realm,
@@ -77,6 +79,10 @@ export default class ObjectValue extends ConcreteValue {
     // as other code checks whether this.$IsClassPrototype === undefined
     // as a proxy for whether initialization is still ongoing.
     this.$IsClassPrototype = false;
+    this.i = i++;
+    // if (this.i === 3738) {
+    //   debugger;
+    // }
   }
 
   static trackedPropertyNames = [

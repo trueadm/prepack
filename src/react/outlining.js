@@ -41,6 +41,7 @@ import { getInitialProps } from "./components.js";
 import traverseFast from "../utils/traverse-fast.js";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
+import generate from "@babel/generator";
 
 function collectRuntimeValuesFromFunctionValue(
   realm: Realm,
@@ -138,6 +139,9 @@ function collectRuntimeValuesFromConcreteValue(
   possibleDeadCodeValues: Set<Value>,
   effects: Effects
 ): void {
+  // if (val.astNode && val.astNode.start === 61236) {
+  //   debugger;
+  // }
   if (val instanceof ObjectValue) {
     if (!effects.createdObjects.has(val)) {
       // If this object was created outside of the function,
@@ -153,7 +157,8 @@ function collectRuntimeValuesFromConcreteValue(
           }
           invariant(false, "TODO support prototype and callee for non-function objects");
         }
-        let propVal = Get(realm, val, propName);
+        let propVal = binding.descriptor.value;
+        invariant(propVal instanceof Value);
         collectRuntimeValuesFromValue(realm, propVal, runtimeValues, possibleDeadCodeValues, effects);
       }
     }
@@ -175,6 +180,19 @@ function collectRuntimeValuesFromConcreteValue(
   }
 }
 
+function getConcreteObjectValuesFromBranch(branch: Value, concreteValues: Set<Value>): void {
+  if (branch instanceof ObjectValue) {
+    concreteValues.add(branch);
+  } else if (
+    branch instanceof AbstractValue &&
+    (branch.type === "conditional" || branch.type === "||" || branch.type === "&&")
+  ) {
+    for (let arg of branch.args) {
+      getConcreteObjectValuesFromBranch(arg, concreteValues);
+    }
+  }
+}
+
 function collectRuntimeValuesFromAbstractValue(
   realm: Realm,
   val: AbstractValue,
@@ -182,9 +200,13 @@ function collectRuntimeValuesFromAbstractValue(
   possibleDeadCodeValues: Set<Value>,
   effects: Effects
 ): void {
+  // if (val.astNode && val.astNode.start === 71656) {
+  //   debugger;
+  // }
   if (!effects.createdAbstracts.has(val)) {
-    // If this abstract was created outside of the function,
-    // then we already know its values
+    return val;
+  }
+  if (runtimeValues.has(val)) {
     return;
   }
   if (valueIsKnownReactAbstraction(realm, val)) {
@@ -200,13 +222,27 @@ function collectRuntimeValuesFromAbstractValue(
     runtimeValues.add(val);
   } else if (val.kind === "conditional") {
     let [condValue, consequentVal, alternateVal] = val.args;
-    let condRuntimeValues = new Set();
-    collectRuntimeValuesFromValue(realm, condValue, condRuntimeValues, possibleDeadCodeValues, effects);
-    if (condRuntimeValues.size > 0) {
-      runtimeValues.add(condValue);
-    }
+
+    // runtimeValues.add(condValue);
+    collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
     collectRuntimeValuesFromValue(realm, consequentVal, runtimeValues, possibleDeadCodeValues, effects);
     collectRuntimeValuesFromValue(realm, alternateVal, runtimeValues, possibleDeadCodeValues, effects);
+  } else if (val.kind === "||" || val.kind === "&&") {
+    let [condValue, rightVal] = val.args;
+
+    // let concreteValues = new Set();
+    // getConcreteObjectValuesFromBranch(condValue, concreteValues);
+    // if (concreteValues.size > 0) {
+    //   collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
+    // } else {
+    //   runtimeValues.add(condValue);
+    // }
+    collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
+    collectRuntimeValuesFromValue(realm, rightVal, runtimeValues, possibleDeadCodeValues, effects);
+  } else if (isAbstractValueBinaryExpression(val) || isAbstractValueUnaryExpression(val)) {
+    runtimeValues.add(val);
+  } else if (val.kind !== undefined && val.kind.startsWith("template:")) {
+    // We can clone templates
   } else if (val.args.length > 0) {
     for (let arg of val.args) {
       collectRuntimeValuesFromValue(realm, arg, runtimeValues, possibleDeadCodeValues, effects);
@@ -599,72 +635,46 @@ function cloneAndModelAbstractValue(
   if (val.isTemporal()) {
     return cloneAndModelAbstractTemporalValue(realm, val, runtimeValuesMapping, effects);
   } else if (val.kind !== undefined) {
+    if (val.kind.startsWith("template:")) {
+      let source = val.kind.replace("template:", "");
+      let clonedArgs = val.args.map(arg => cloneAndModelValue(realm, arg, runtimeValuesMapping, effects));
+      return AbstractValue.createFromTemplate(realm, source, val.getType(), clonedArgs);
+    } else if (isAbstractValueBinaryExpression(val)) {
+      let [leftValue, rightValue] = val.args;
+      let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
+      let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
+      return AbstractValue.createFromBinaryOp(realm, val.kind, clonedLeftValue, clonedRightValue);
+    } else if (isAbstractValueUnaryExpression(val)) {
+      let [condValue] = val.args;
+      let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValuesMapping, effects);
+      invariant(val.operationDescriptor !== undefined);
+      invariant(clonedCondValue instanceof AbstractValue);
+      let hasPrefix = val.operationDescriptor.data.prefix;
+      return AbstractValue.createFromUnaryOp(realm, val.kind, clonedCondValue, hasPrefix);
+    }
     switch (val.kind) {
       case "conditional": {
         let [condValue, consequentVal, alternateVal] = val.args;
+
         let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValuesMapping, effects);
         let clonedConsequentVal = cloneAndModelValue(realm, consequentVal, runtimeValuesMapping, effects);
         let clonedAlternateVal = cloneAndModelValue(realm, alternateVal, runtimeValuesMapping, effects);
         return AbstractValue.createFromConditionalOp(realm, clonedCondValue, clonedConsequentVal, clonedAlternateVal);
       }
-      case "!":
-      case "typeof":
-      case "delete":
-      case "+":
-      case "-":
-      case "void":
-      case "~": {
-        // Unary ops
-        let [condValue] = val.args;
-        let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValuesMapping, effects);
-        invariant(val.operationDescriptor !== undefined);
-        invariant(clonedCondValue instanceof AbstractValue);
-        let hasPrefix = val.operationDescriptor.data.prefix;
-        return AbstractValue.createFromUnaryOp(realm, val.kind, clonedCondValue, hasPrefix);
-      }
       case "||":
-      case "&&": {
-        // Logical ops
+      case "&&":
         let [leftValue, rightValue] = val.args;
         let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
         let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
         return AbstractValue.createFromLogicalOp(realm, val.kind, clonedLeftValue, clonedRightValue);
-      }
+        break;
       case "widened numeric property":
         return AbstractValue.createFromType(realm, Value, "widened numeric property", [...val.args]);
-      case "+":
-      case "-":
-      case "!=":
-      case "==":
-      case "===":
-      case "!==":
-      case "instanceof":
-      case "in":
-      case ">":
-      case "<":
-      case ">=":
-      case "<=":
-      case ">>>":
-      case ">>":
-      case "<<":
-      case "&":
-      case "|":
-      case "^":
-      case "**":
-      case "%":
-      case "/":
-      case "*": {
-        // Binary ops
-        let [leftValue, rightValue] = val.args;
-        let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
-        let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
-        return AbstractValue.createFromBinaryOp(realm, val.kind, clonedLeftValue, clonedRightValue);
-      }
       default:
         invariant(false, "TODO");
     }
+    invariant(false, "Should not be possible");
   }
-  debugger;
 }
 
 function cloneAndModelValue(
@@ -699,13 +709,23 @@ function wrapBabelNodeInRuntimeTransform(astNode: BabelNode) {
   );
 }
 
-function applyBabelTransformForRuntimeValuesOnAstNode(realm: Realm, astNode: BabelNode): void {
+function applyBabelTransformForRuntimeValuesOnAstNode(
+  realm: Realm,
+  astNode: BabelNode,
+  mustWrap?: boolean = false
+): void {
   let astNodeParent = realm.astNodeParents.get(astNode);
   invariant(astNodeParent !== undefined);
 
   if (t.isMemberExpression(astNodeParent)) {
+    if (mustWrap) {
+      invariant(false, "Should never happen");
+    }
     applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
   } else if (t.isCallExpression(astNodeParent)) {
+    if (mustWrap) {
+      invariant(false, "Should never happen");
+    }
     applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
   } else if (t.isJSXExpressionContainer(astNodeParent)) {
     astNodeParent.expression = wrapBabelNodeInRuntimeTransform(astNode);
@@ -716,25 +736,55 @@ function applyBabelTransformForRuntimeValuesOnAstNode(realm: Realm, astNode: Bab
       astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
     } else if (astNodeParent.consequent === astNode) {
       astNodeParent.consequent = wrapBabelNodeInRuntimeTransform(astNode);
-    } else {
+    } else if (astNodeParent.alternate === astNode) {
       astNodeParent.alternate = wrapBabelNodeInRuntimeTransform(astNode);
     }
   } else if (t.isVariableDeclarator(astNodeParent)) {
-    if (astNodeParent.init === astNode) {
-      astNodeParent.init = wrapBabelNodeInRuntimeTransform(astNode);
-    } else {
-      invariant(false, "TODO not possible to get here?");
-    }
+    astNodeParent.init = wrapBabelNodeInRuntimeTransform(astNode);
   } else if (t.isLogicalExpression(astNodeParent)) {
-    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
+    if (mustWrap) {
+      if (astNodeParent.left === astNode) {
+        astNodeParent.left = wrapBabelNodeInRuntimeTransform(astNode);
+      } else if (astNodeParent.right === astNode) {
+        astNodeParent.right = wrapBabelNodeInRuntimeTransform(astNode);
+      }
+    } else {
+      applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
+    }
   } else if (t.isConditionalExpression(astNodeParent)) {
     if (astNodeParent.test === astNode) {
       astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
     } else if (astNodeParent.consequent === astNode) {
       astNodeParent.consequent = wrapBabelNodeInRuntimeTransform(astNode);
-    } else {
+    } else if (astNodeParent.alternate === astNode) {
       astNodeParent.alternate = wrapBabelNodeInRuntimeTransform(astNode);
     }
+  } else if (t.isBinaryExpression(astNodeParent)) {
+    if (mustWrap) {
+      invariant(false, "Should never happen");
+    }
+    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
+  } else if (t.isReturnStatement(astNodeParent)) {
+    astNodeParent.argument = wrapBabelNodeInRuntimeTransform(astNode);
+  } else if (t.isObjectProperty(astNodeParent)) {
+    astNodeParent.value = wrapBabelNodeInRuntimeTransform(astNode);
+  } else if (t.isUnaryExpression(astNodeParent)) {
+    if (mustWrap) {
+      invariant(false, "Should never happen");
+    }
+    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
+  } else if (t.isAssignmentExpression(astNodeParent)) {
+    astNodeParent.right = astNode;
+  } else if (t.isArrayExpression(astNodeParent)) {
+    for (let i = 0; i < astNodeParent.elements.length; i++) {
+      let element = astNodeParent.elements[i];
+      if (element === astNode) {
+        astNodeParent.elements[i] = wrapBabelNodeInRuntimeTransform(astNode);
+        break;
+      }
+    }
+  } else if (t.isArrowFunctionExpression(astNodeParent)) {
+    astNodeParent.body = wrapBabelNodeInRuntimeTransform(astNode);
   } else {
     invariant(false, "TODO");
   }
@@ -759,7 +809,7 @@ function applyBabelTransformForDeadCodeOnAstNode(realm: Realm, astNode: BabelNod
       invariant(false, "TODO not possible to get here?");
     }
   } else {
-    invariant(false, "TODO not possible to get here?");
+    invariant(false, "TODO");
   }
 }
 
@@ -781,13 +831,21 @@ function applyBabelTransformsWithRuntimeValues(
   for (let runtimeValue of runtimeValues) {
     let astNode = runtimeValue.astNode;
     invariant(astNode !== undefined);
-    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNode);
+    if (
+      runtimeValue instanceof AbstractValue &&
+      (runtimeValue.kind === "||" || runtimeValue.kind === "&&") &&
+      (t.isLogicalExpression(astNode) || t.isCallExpression(astNode))
+    ) {
+      applyBabelTransformForRuntimeValuesOnAstNode(realm, astNode, true);
+    } else {
+      applyBabelTransformForRuntimeValuesOnAstNode(realm, astNode, false);
+    }
     markContainingFunction(astNode);
   }
   for (let possibleDeadCodeValue of possibleDeadCodeValues) {
     let astNode = possibleDeadCodeValue.astNode;
     invariant(astNode !== undefined);
-    applyBabelTransformForDeadCodeOnAstNode(realm, astNode);
+    // applyBabelTransformForDeadCodeOnAstNode(realm, astNode);
     markContainingFunction(astNode);
   }
 }
@@ -871,6 +929,7 @@ function shallowCloneFunctionValue(realm: Realm, func: ECMAScriptSourceFunctionV
   invariant(func.isValid());
   let clonedFunc = Functions.FunctionCreate(realm, func.$FunctionKind, params, body, func.$Environment, func.$Strict);
   realm.react.originalFuncToClonedFunc.set(func, clonedFunc);
+  realm.astNodeParents.set(body, t.functionExpression(t.identifier("__shallowCloneFunctionValue__"), params, body));
   traverseFast(body, null, (node, parentNode) => {
     if (parentNode !== null) realm.astNodeParents.set(node, parentNode);
     if (!t.isIdentifier(node)) return false;
@@ -951,7 +1010,7 @@ export function getValueFromOutlinedFunctionComponent(
   // Also make all the props deeply final (a constrain added to React component props)
   let clonedFunc;
   if (isRoot) {
-    clonedFunc = shallowCloneFunctionValue(realm, func);
+    // clonedFunc = shallowCloneFunctionValue(realm, func);
   }
   deeplyMakeAllArgsFinal(realm, args);
 
@@ -965,6 +1024,7 @@ export function getValueFromOutlinedFunctionComponent(
   // If this was done on the same function at a previous point this will be a no-op.
   let runtimeValues = createRuntimeValuesAndApplyBabelTransform(realm, clonedFunc || func);
 
+  printAst();
   // 4. Evaluate the component render again, this time with the args we were given.
   // Furthermore, we are now evaluating code that has had code transforms applied.
   let [babelTransformedEffects, babelTransformedResult] = getValueAndEffectsFromFunctionCall(
@@ -977,19 +1037,20 @@ export function getValueFromOutlinedFunctionComponent(
   );
 
   // 5. Generate a set of variable references for each of the runtime variables
-  let runtimeValueReferenceNames = Array.from(Array(runtimeValues.size)).map(() =>
-    realm.preludeGenerator.nameGenerator.generate("outlined")
-  );
-
+  // and map the variable references to the new values
+  let runtimeValueReferenceNames;
   let runtimeValuesMapping = new Map();
 
-  // 6. Map the variable references to the new values
   applyPreviousEffects(realm, babelTransformedEffects, () => {
     let reactValues = Get(realm, realm.$GlobalObject, "__rv");
+    let totalValues = reactValues.properties.size;
 
-    for (let i = 0; i < runtimeValues.size; i++) {
+    runtimeValueReferenceNames = Array.from(Array(totalValues)).map(() =>
+      realm.preludeGenerator.nameGenerator.generate("outlined")
+    );
+
+    for (let i = 0; i < totalValues; i++) {
       let reactValue = Get(realm, reactValues, i + "");
-      invariant(reactValue !== realm.intrinsics.undefined);
       runtimeValuesMapping.set(reactValue, runtimeValueReferenceNames[i]);
     }
   });
@@ -1019,6 +1080,10 @@ export function getValueFromOutlinedFunctionComponent(
     cloneAndModelValue(realm, babelTransformedResult, runtimeValuesMapping, babelTransformedEffects)
   );
   return returnValue(clonedAndModelledValue);
+}
+
+function printAst() {
+  console.log(generate(global.ast).code);
 }
 
 function collectNodes(node, dynamicNodes) {
@@ -1131,4 +1196,48 @@ export function stripDeadReactCode(realm: Realm): void {
     traverse(t.file(t.program([node])), ReactElementVisitor, null, null);
   }
   traverse.cache.clear();
+}
+
+function isAbstractValueBinaryExpression(val: AbstractValue): boolean {
+  const kind = val.kind;
+  return (
+    val.args.length === 2 &&
+    (kind === "!=" ||
+      kind === "==" ||
+      kind === "==" ||
+      kind === "===" ||
+      kind === "!==" ||
+      kind === "instanceof" ||
+      kind === "in" ||
+      kind === ">" ||
+      kind === "<" ||
+      kind === ">=" ||
+      kind === "<=" ||
+      kind === ">>>" ||
+      kind === ">>" ||
+      kind === "<<" ||
+      kind === "&" ||
+      kind === "|" ||
+      kind === "^" ||
+      kind === "**" ||
+      kind === "%" ||
+      kind === "/" ||
+      kind === "*" ||
+      kind === "+" ||
+      kind === "-")
+  );
+}
+
+export function isAbstractValueUnaryExpression(val: AbstractValue): boolean {
+  const kind = val.kind;
+  return (
+    val.args.length === 1 &&
+    (kind === "+" ||
+      kind === "-" ||
+      kind === "!" ||
+      kind === "typeof" ||
+      kind === "delete" ||
+      kind === "void" ||
+      kind === "~")
+  );
 }

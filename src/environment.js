@@ -1189,6 +1189,7 @@ export class LexicalEnvironment {
       let ast;
       [ast, code] = this.concatenateAndParse(sources, sourceType);
       if (onParse) onParse(ast);
+      global.ast = ast;
       res = this.realm.statistics.evaluation.measure(() => this.evaluateCompletion(ast, false));
     } finally {
       this.realm.popContext(context);

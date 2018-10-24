@@ -41,6 +41,8 @@ import type { BabelNodeCallExpression } from "@babel/types";
 import invariant from "../invariant.js";
 import SuperCall from "./SuperCall.js";
 import { createOperationDescriptor } from "../utils/generator.js";
+import { SimpleNormalCompletion } from "../completions.js";
+import * as t from "@babel/types";
 
 export default function(
   ast: BabelNodeCallExpression,
@@ -285,6 +287,14 @@ function tryToEvaluateCallOrLeaveAsAbstract(
     }
   } finally {
     realm.suppressDiagnostics = savedSuppressDiagnostics;
+  }
+  if (effects.result instanceof SimpleNormalCompletion) {
+    let value = effects.result.value;
+    if (value instanceof AbstractValue && value.kind === "conditional") {
+      if (!t.isConditionalExpression(value.astNode) && !t.isIfStatement(value.astNode)) {
+        value.astNode = ast;
+      }
+    }
   }
   realm.applyEffects(effects);
   return realm.returnOrThrowCompletion(effects.result);

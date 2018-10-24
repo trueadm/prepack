@@ -221,6 +221,9 @@ function evaluateJSXAttributes(
 
   const setConfigProperty = (name: string, value: Value): void => {
     invariant(config instanceof ObjectValue);
+    if (value instanceof ObjectValue) {
+      value.makeFinal();
+    }
     Properties.Set(realm, config, name, value, true);
   };
 
