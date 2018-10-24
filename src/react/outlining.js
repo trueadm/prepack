@@ -709,6 +709,8 @@ function applyBabelTransformForRuntimeValuesOnAstNode(realm: Realm, astNode: Bab
     applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
   } else if (t.isJSXExpressionContainer(astNodeParent)) {
     astNodeParent.expression = wrapBabelNodeInRuntimeTransform(astNode);
+  } else if (t.isJSXSpreadAttribute(astNodeParent)) {
+    astNodeParent.argument = wrapBabelNodeInRuntimeTransform(astNode);
   } else if (t.isIfStatement(astNodeParent)) {
     if (astNodeParent.test === astNode) {
       astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
@@ -1043,7 +1045,7 @@ function createNewNode(path, node) {
   const dynamicNodes = [];
   collectNodes(node, dynamicNodes);
   if (dynamicNodes.length === 0) {
-    return t.emptyStatement();
+    return t.unaryExpression("void", t.numericLiteral(0));
   }
   return t.sequenceExpression(dynamicNodes);
 }
@@ -1076,7 +1078,7 @@ const ReactElementVisitor = {
       if (parentNode.consequent === node) {
         parentNode.consequent = createNewNode(path, node);
       } else {
-        parentNode.alternative = createNewNode(path, node);
+        parentNode.alternate = createNewNode(path, node);
       }
     } else if (t.isLogicalExpression(parentNode)) {
       if (parentNode.left === node) {

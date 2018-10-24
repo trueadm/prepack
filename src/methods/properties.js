@@ -1437,28 +1437,30 @@ export class PropertiesImplementation {
   OrdinaryGetOwnProperty(realm: Realm, O: ObjectValue, P: PropertyKeyValue): Descriptor | void {
     // if the object is leaked and final, then it's still safe to read the value from the object
     if (!realm.ignoreLeakLogic && O.mightBeLeakedObject()) {
-      if (!O.mightNotBeFinalObject()) {
-        let existingBinding = InternalGetPropertiesMap(O, P).get(InternalGetPropertiesKey(P));
-        if (existingBinding && existingBinding.descriptor) {
-          return existingBinding.descriptor;
-        } else {
-          return undefined;
+      if (O.mightBeFinalObject()) {
+        if (!O.isPartialObject()) {
+          let existingBinding = InternalGetPropertiesMap(O, P).get(InternalGetPropertiesKey(P));
+          if (existingBinding && existingBinding.descriptor) {
+            return existingBinding.descriptor;
+          } else {
+            return undefined;
+          }
         }
+      } else {
+        let propName = P;
+        if (typeof propName === "string") {
+          propName = new StringValue(realm, propName);
+        }
+        let absVal = AbstractValue.createTemporalFromBuildFunction(
+          realm,
+          Value,
+          [O._templateFor || O, propName],
+          createOperationDescriptor("ABSTRACT_PROPERTY"),
+          { isPure: true }
+        );
+        // TODO: We can't be sure what the descriptor will be, but the value will be abstract.
+        return new PropertyDescriptor({ configurable: true, enumerable: true, value: absVal, writable: true });
       }
-
-      let propName = P;
-      if (typeof propName === "string") {
-        propName = new StringValue(realm, propName);
-      }
-      let absVal = AbstractValue.createTemporalFromBuildFunction(
-        realm,
-        Value,
-        [O._templateFor || O, propName],
-        createOperationDescriptor("ABSTRACT_PROPERTY"),
-        { isPure: true }
-      );
-      // TODO: We can't be sure what the descriptor will be, but the value will be abstract.
-      return new PropertyDescriptor({ configurable: true, enumerable: true, value: absVal, writable: true });
     }
 
     // 1. Assert: IsPropertyKey(P) is true.

@@ -76,11 +76,7 @@ function createPropsObject(
   if (possibleKey !== realm.intrinsics.null && possibleKey !== realm.intrinsics.undefined) {
     // if the config has been marked as having no partial key or ref and the possible key
     // is abstract, yet the config doesn't have a key property, then the key can remain null
-    let keyNotNeeded =
-      hasNoPartialKeyOrRef(realm, config) &&
-      possibleKey instanceof AbstractValue &&
-      config instanceof ObjectValue &&
-      !config.properties.has("key");
+    let keyNotNeeded = hasNoPartialKeyOrRef(realm, config) && possibleKey instanceof AbstractValue;
 
     if (!keyNotNeeded) {
       key = computeBinary(realm, "+", realm.intrinsics.emptyString, possibleKey);
@@ -91,11 +87,7 @@ function createPropsObject(
   if (possibleRef !== realm.intrinsics.null && possibleRef !== realm.intrinsics.undefined && !firstRenderOnly) {
     // if the config has been marked as having no partial key or ref and the possible ref
     // is abstract, yet the config doesn't have a ref property, then the ref can remain null
-    let refNotNeeded =
-      hasNoPartialKeyOrRef(realm, config) &&
-      possibleRef instanceof AbstractValue &&
-      config instanceof ObjectValue &&
-      !config.properties.has("ref");
+    let refNotNeeded = hasNoPartialKeyOrRef(realm, config) && possibleRef instanceof AbstractValue;
 
     if (!refNotNeeded) {
       ref = possibleRef;
