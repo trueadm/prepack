@@ -572,12 +572,11 @@ export default function(realm: Realm): NativeFunctionValue {
     // If we're in pure scope and the items are completely abstract,
     // then create an abstract temporal with an array kind
     if (realm.isInPureScope() && obj instanceof AbstractObjectValue) {
-      let array = ArrayValue.createTemporalWithWidenedNumericProperty(
+      return ArrayValue.createTemporalWithWidenedNumericProperty(
         realm,
         [objectKeys, obj],
         createOperationDescriptor("UNKNOWN_ARRAY_METHOD_CALL")
       );
-      return array;
     } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(obj)) {
       return ArrayValue.createTemporalWithWidenedNumericProperty(
         realm,

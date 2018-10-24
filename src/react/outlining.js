@@ -46,6 +46,7 @@ function collectRuntimeValuesFromFunctionValue(
   realm: Realm,
   val: ECMAScriptSourceFunctionValue,
   runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
   effects: Effects
 ) {
   let bindings = new Set();
@@ -71,7 +72,7 @@ function collectRuntimeValuesFromFunctionValue(
         if (bindings.has(envBindingName)) {
           let binding = envBindings[envBindingName];
           if (binding !== null && binding.value !== undefined) {
-            collectRuntimeValuesFromValue(realm, binding.value, runtimeValues, effects);
+            collectRuntimeValuesFromValue(realm, binding.value, runtimeValues, possibleDeadCodeValues, effects);
           }
         }
       }
@@ -80,10 +81,61 @@ function collectRuntimeValuesFromFunctionValue(
   }
 }
 
+function collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+  realm: Realm,
+  val: ConcreteValue,
+  runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
+  effects: Effects
+): void {
+  let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+  invariant(temporalOperationEntry !== undefined);
+  let { args, operationDescriptor } = temporalOperationEntry;
+  if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
+    let [arrayLikeObject, methodProperty, callbackfn] = args;
+    invariant(methodProperty instanceof StringValue);
+    // For now we only support nested optimized functions on map and filter
+    if (methodProperty.value === "map" || methodProperty.value === "filter") {
+      collectRuntimeValuesFromFunctionValue(realm, callbackfn, runtimeValues, possibleDeadCodeValues, effects);
+      // First arg is the referencing array
+      possibleDeadCodeValues.add(val);
+      if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayLikeObject)) {
+        collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+          realm,
+          arrayLikeObject,
+          runtimeValues,
+          possibleDeadCodeValues,
+          effects
+        );
+      } else {
+        collectRuntimeValuesFromValue(realm, arrayLikeObject, runtimeValues, possibleDeadCodeValues, effects);
+      }
+      return;
+    }
+  } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
+    let [, arrayLikeObject] = args;
+    possibleDeadCodeValues.add(val);
+    if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayLikeObject)) {
+      collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+        realm,
+        arrayLikeObject,
+        runtimeValues,
+        possibleDeadCodeValues,
+        effects
+      );
+    } else {
+      collectRuntimeValuesFromValue(realm, arrayLikeObject, runtimeValues, possibleDeadCodeValues, effects);
+    }
+    return;
+  }
+  runtimeValues.add(val);
+}
+
 function collectRuntimeValuesFromConcreteValue(
   realm: Realm,
   val: ConcreteValue,
   runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
   effects: Effects
 ): void {
   if (val instanceof ObjectValue) {
@@ -102,33 +154,19 @@ function collectRuntimeValuesFromConcreteValue(
           invariant(false, "TODO support prototype and callee for non-function objects");
         }
         let propVal = Get(realm, val, propName);
-        collectRuntimeValuesFromValue(realm, propVal, runtimeValues, effects);
+        collectRuntimeValuesFromValue(realm, propVal, runtimeValues, possibleDeadCodeValues, effects);
       }
     }
     if (val instanceof FunctionValue) {
-      collectRuntimeValuesFromFunctionValue(realm, val, runtimeValues, effects);
+      collectRuntimeValuesFromFunctionValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
     } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
-      // If this is needed for render phase, we can re-model it to some degree.
-      if (val.nestedOptimizedFunctionEffects !== undefined && val.nestedOptimizedFunctionEffects.size > 0) {
-        let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
-        invariant(temporalOperationEntry !== undefined);
-        let { args, operationDescriptor } = temporalOperationEntry;
-        if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
-          let [arr, methodProperty, callbackfn] = args;
-          // For now we only support nested optimized functions on map and filter
-          if (methodProperty.value === "map" || methodProperty.value === "filter") {
-            collectRuntimeValuesFromFunctionValue(realm, callbackfn, runtimeValues, effects);
-            // First arg is the referencing array
-            if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arr)) {
-              runtimeValues.add(arr);
-            } else {
-              invariant(false, "TODO");
-            }
-            return;
-          }
-        }
-      }
-      runtimeValues.add(val);
+      collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+        realm,
+        val,
+        runtimeValues,
+        possibleDeadCodeValues,
+        effects
+      );
     } else {
       invariant(
         val.$Prototype === realm.intrinsics.ObjectPrototype || val.$Prototype === realm.intrinsics.ArrayPrototype
@@ -141,6 +179,7 @@ function collectRuntimeValuesFromAbstractValue(
   realm: Realm,
   val: AbstractValue,
   runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
   effects: Effects
 ): void {
   if (!effects.createdAbstracts.has(val)) {
@@ -162,26 +201,32 @@ function collectRuntimeValuesFromAbstractValue(
   } else if (val.kind === "conditional") {
     let [condValue, consequentVal, alternateVal] = val.args;
     let condRuntimeValues = new Set();
-    collectRuntimeValuesFromValue(realm, condValue, condRuntimeValues, effects);
+    collectRuntimeValuesFromValue(realm, condValue, condRuntimeValues, possibleDeadCodeValues, effects);
     if (condRuntimeValues.size > 0) {
       runtimeValues.add(condValue);
     }
-    collectRuntimeValuesFromValue(realm, consequentVal, runtimeValues, effects);
-    collectRuntimeValuesFromValue(realm, alternateVal, runtimeValues, effects);
+    collectRuntimeValuesFromValue(realm, consequentVal, runtimeValues, possibleDeadCodeValues, effects);
+    collectRuntimeValuesFromValue(realm, alternateVal, runtimeValues, possibleDeadCodeValues, effects);
   } else if (val.args.length > 0) {
     for (let arg of val.args) {
-      collectRuntimeValuesFromValue(realm, arg, runtimeValues, effects);
+      collectRuntimeValuesFromValue(realm, arg, runtimeValues, possibleDeadCodeValues, effects);
     }
   } else {
     invariant(false, "TODO");
   }
 }
 
-function collectRuntimeValuesFromValue(realm: Realm, val: Value, runtimeValues: Set<Value>, effects: Effects): void {
+function collectRuntimeValuesFromValue(
+  realm: Realm,
+  val: Value,
+  runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
+  effects: Effects
+): void {
   if (val instanceof ConcreteValue) {
-    collectRuntimeValuesFromConcreteValue(realm, val, runtimeValues, effects);
+    collectRuntimeValuesFromConcreteValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
   } else {
-    collectRuntimeValuesFromAbstractValue(realm, val, runtimeValues, effects);
+    collectRuntimeValuesFromAbstractValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
   }
 }
 
@@ -408,7 +453,16 @@ function cloneAndModelArrayWithNumericWidenedProperty(
   val: ArrayValue,
   runtimeValuesMapping: Map<Value, string>,
   effects: Effects
-) {
+): ArrayValue {
+  let intrinsicName;
+  if (isTemporalValueDeeplyReferencingPropsObject(realm, val)) {
+    intrinsicName = getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm, val);
+    if (realm.react.outlinedTemporalValue.has(intrinsicName)) {
+      let arrayLikeObject = realm.react.outlinedTemporalValue.get(intrinsicName);
+      invariant(arrayLikeObject instanceof ArrayValue);
+      return arrayLikeObject;
+    }
+  }
   let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
   invariant(temporalOperationEntry !== undefined);
   let { args, operationDescriptor } = temporalOperationEntry;
@@ -427,12 +481,26 @@ function cloneAndModelArrayWithNumericWidenedProperty(
         },
       ];
     }
-    return ArrayValue.createTemporalWithWidenedNumericProperty(
+    let clonedArrayLikeObject = ArrayValue.createTemporalWithWidenedNumericProperty(
       realm,
       clonedArgs,
       createOperationDescriptor("UNKNOWN_ARRAY_METHOD_PROPERTY_CALL"),
       possibleNestedOptimizedFunctions
     );
+    if (intrinsicName !== undefined) {
+      realm.react.outlinedTemporalValue.set(intrinsicName, clonedArrayLikeObject);
+    }
+    return clonedArrayLikeObject;
+  } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
+    let clonedArrayLikeObject = ArrayValue.createTemporalWithWidenedNumericProperty(
+      realm,
+      clonedArgs,
+      createOperationDescriptor("UNKNOWN_ARRAY_METHOD_CALL")
+    );
+    if (intrinsicName !== undefined) {
+      realm.react.outlinedTemporalValue.set(intrinsicName, clonedArrayLikeObject);
+    }
+    return clonedArrayLikeObject;
   }
   invariant(false, "TODO");
 }
@@ -476,8 +544,8 @@ function cloneAndModelAbstractTemporalValue(
   effects: Effects
 ): AbstractValue {
   let intrinsicName = getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm, val);
-  if (realm.react.outlinedTemporalAbstract.has(intrinsicName)) {
-    let abstractValue = realm.react.outlinedTemporalAbstract.get(intrinsicName);
+  if (realm.react.outlinedTemporalValue.has(intrinsicName)) {
+    let abstractValue = realm.react.outlinedTemporalValue.get(intrinsicName);
     invariant(abstractValue !== undefined);
     return abstractValue;
   }
@@ -487,14 +555,14 @@ function cloneAndModelAbstractTemporalValue(
   switch (operationDescriptor.type) {
     case "ABSTRACT_PROPERTY": {
       let clonedTemporalArgs = args.map(arg => cloneAndModelValue(realm, arg, runtimeValuesMapping, effects));
-      let abstractValue = AbstractValue.createFromBuildFunction(
+      let abstractValue = AbstractValue.createTemporalFromBuildFunction(
         realm,
         val.getType(),
         clonedTemporalArgs,
         createOperationDescriptor("ABSTRACT_PROPERTY"),
         { kind: val.kind, isPure: temporalOperationEntry.isPure, skipInvariant: temporalOperationEntry.skipInvariant }
       );
-      realm.react.outlinedTemporalAbstract.set(intrinsicName, abstractValue);
+      realm.react.outlinedTemporalValue.set(intrinsicName, abstractValue);
       return abstractValue;
     }
     case "ABSTRACT_OBJECT_GET": {
@@ -511,7 +579,7 @@ function cloneAndModelAbstractTemporalValue(
           shape: val.shape,
         }
       );
-      realm.react.outlinedTemporalAbstract.set(intrinsicName, abstractValue);
+      realm.react.outlinedTemporalValue.set(intrinsicName, abstractValue);
       return abstractValue;
     }
     default:
@@ -594,7 +662,7 @@ function cloneAndModelValue(
   }
 }
 
-function wrapBabelNodeInTransform(astNode: BabelNode) {
+function wrapBabelNodeInRuntimeTransform(astNode: BabelNode) {
   return t.assignmentExpression(
     "=",
     t.memberExpression(t.identifier("__rv"), t.updateExpression("++", t.identifier("__ri")), true),
@@ -602,51 +670,74 @@ function wrapBabelNodeInTransform(astNode: BabelNode) {
   );
 }
 
-function applyBabelTransformOnAstNode(realm: Realm, astNode: BabelNode): void {
+function applyBabelTransformForRuntimeValuesOnAstNode(realm: Realm, astNode: BabelNode): void {
   let astNodeParent = realm.astNodeParents.get(astNode);
   invariant(astNodeParent !== undefined);
 
   if (t.isMemberExpression(astNodeParent)) {
-    applyBabelTransformOnAstNode(realm, astNodeParent);
+    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
   } else if (t.isCallExpression(astNodeParent)) {
-    applyBabelTransformOnAstNode(realm, astNodeParent);
+    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
   } else if (t.isJSXExpressionContainer(astNodeParent)) {
-    astNodeParent.expression = wrapBabelNodeInTransform(astNode);
+    astNodeParent.expression = wrapBabelNodeInRuntimeTransform(astNode);
   } else if (t.isIfStatement(astNodeParent)) {
     if (astNodeParent.test === astNode) {
-      astNodeParent.test = wrapBabelNodeInTransform(astNode);
+      astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
     } else if (astNodeParent.consequent === astNode) {
-      astNodeParent.consequent = wrapBabelNodeInTransform(astNode);
+      astNodeParent.consequent = wrapBabelNodeInRuntimeTransform(astNode);
     } else {
-      astNodeParent.alternate = wrapBabelNodeInTransform(astNode);
+      astNodeParent.alternate = wrapBabelNodeInRuntimeTransform(astNode);
     }
   } else if (t.isVariableDeclarator(astNodeParent)) {
     if (astNodeParent.init === astNode) {
-      astNodeParent.init = wrapBabelNodeInTransform(astNode);
+      astNodeParent.init = wrapBabelNodeInRuntimeTransform(astNode);
     } else {
       invariant(false, "TODO not possible to get here?");
     }
   } else if (t.isLogicalExpression(astNodeParent)) {
-    applyBabelTransformOnAstNode(realm, astNodeParent);
+    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
   } else if (t.isConditionalExpression(astNodeParent)) {
     if (astNodeParent.test === astNode) {
-      astNodeParent.test = wrapBabelNodeInTransform(astNode);
+      astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
     } else if (astNodeParent.consequent === astNode) {
-      astNodeParent.consequent = wrapBabelNodeInTransform(astNode);
+      astNodeParent.consequent = wrapBabelNodeInRuntimeTransform(astNode);
     } else {
-      astNodeParent.alternate = wrapBabelNodeInTransform(astNode);
+      astNodeParent.alternate = wrapBabelNodeInRuntimeTransform(astNode);
     }
   } else {
     invariant(false, "TODO");
   }
 }
 
-function applyBabelTransformsWithRuntimeValues(realm: Realm, runtimeValues: Set<Value>): void {
-  for (let runtimeValue of runtimeValues) {
-    let astNode = runtimeValue.astNode;
-    invariant(astNode !== undefined);
-    applyBabelTransformOnAstNode(realm, astNode);
-    // Mark the function that the astNode is in
+function wrapBabelNodeInDeadcodeTransform(astNode: BabelNode) {
+  return t.callExpression(t.identifier("__possibleDeadCode"), [astNode]);
+}
+
+function applyBabelTransformForDeadCodeOnAstNode(realm: Realm, astNode: BabelNode): void {
+  let astNodeParent = realm.astNodeParents.get(astNode);
+  invariant(astNodeParent !== undefined);
+
+  if (t.isMemberExpression(astNodeParent)) {
+    applyBabelTransformForDeadCodeOnAstNode(realm, astNodeParent);
+  } else if (t.isCallExpression(astNodeParent)) {
+    applyBabelTransformForDeadCodeOnAstNode(realm, astNodeParent);
+  } else if (t.isVariableDeclarator(astNodeParent)) {
+    if (astNodeParent.init === astNode) {
+      astNodeParent.init = wrapBabelNodeInDeadcodeTransform(astNode);
+    } else {
+      invariant(false, "TODO not possible to get here?");
+    }
+  } else {
+    invariant(false, "TODO not possible to get here?");
+  }
+}
+
+function applyBabelTransformsWithRuntimeValues(
+  realm: Realm,
+  runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>
+): void {
+  const markContainingFunction = astNode => {
     while (astNode !== undefined) {
       if (t.isFunctionExpression(astNode) || t.isFunctionDeclaration(astNode)) {
         realm.react.outlinedFunctionAstNodes.add(astNode);
@@ -654,6 +745,19 @@ function applyBabelTransformsWithRuntimeValues(realm: Realm, runtimeValues: Set<
       }
       astNode = realm.astNodeParents.get(astNode);
     }
+  };
+
+  for (let runtimeValue of runtimeValues) {
+    let astNode = runtimeValue.astNode;
+    invariant(astNode !== undefined);
+    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNode);
+    markContainingFunction(astNode);
+  }
+  for (let possibleDeadCodeValue of possibleDeadCodeValues) {
+    let astNode = possibleDeadCodeValue.astNode;
+    invariant(astNode !== undefined);
+    applyBabelTransformForDeadCodeOnAstNode(realm, astNode);
+    markContainingFunction(astNode);
   }
 }
 
@@ -708,6 +812,17 @@ function setupEnvironmentForOutlining(realm: Realm) {
         __ri = newValue.value;
         return newValue;
       }),
+      enumerable: false,
+      configurable: true,
+    })
+  );
+  globalObject.$DefineOwnProperty(
+    "__possibleDeadCode",
+    new PropertyDescriptor({
+      value: new NativeFunctionValue(realm, undefined, undefined, 0, (context, [val]) => {
+        return val;
+      }),
+      writable: true,
       enumerable: false,
       configurable: true,
     })
@@ -780,11 +895,12 @@ function createRuntimeValuesAndApplyBabelTransform(realm: Realm, func: ECMAScrip
   let args = [getInitialProps(realm, func, {})];
   let [effects, result] = getValueAndEffectsFromFunctionCall(realm, func, args);
   let runtimeValues = new Set();
+  let possibleDeadCodeValues = new Set();
 
   applyPreviousEffects(realm, effects, () => {
-    collectRuntimeValuesFromValue(realm, result, runtimeValues, effects);
+    collectRuntimeValuesFromValue(realm, result, runtimeValues, possibleDeadCodeValues, effects);
   });
-  applyBabelTransformsWithRuntimeValues(realm, runtimeValues);
+  applyBabelTransformsWithRuntimeValues(realm, runtimeValues, possibleDeadCodeValues);
 
   realm.react.outlinedFunctionInformation.set(func, runtimeValues);
   return runtimeValues;
@@ -961,9 +1077,22 @@ const ReactElementVisitor = {
       }
     }
   },
+  CallExpression(path, state) {
+    const node = path.node;
+
+    if (t.isIdentifier(node.callee) && node.callee.name === "__possibleDeadCode") {
+      const parentNode = path.parentPath.node;
+
+      if (t.isVariableDeclarator(parentNode)) {
+        parentNode.init = t.unaryExpression("void", t.numericLiteral(0));
+      } else {
+        invariant(false, "TODO");
+      }
+    }
+  },
 };
 
-export function stripDeadReactElementNodes(realm: Realm): void {
+export function stripDeadReactCode(realm: Realm): void {
   for (let outlinedFunctionAstNode of realm.react.outlinedFunctionAstNodes) {
     let node = t.isFunctionExpression(outlinedFunctionAstNode)
       ? t.expressionStatement(outlinedFunctionAstNode)

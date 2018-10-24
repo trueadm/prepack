@@ -1163,6 +1163,18 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
       default:
         invariant(false, "TODO");
     }
+  } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+    let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+    invariant(temporalOperationEntry !== undefined);
+    let { args, operationDescriptor } = temporalOperationEntry;
+    if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
+      let [arrayLikeObject] = args;
+      return isTemporalValueDeeplyReferencingPropsObject(realm, arrayLikeObject);
+    } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
+      let [, arrayLikeObject] = args;
+      return isTemporalValueDeeplyReferencingPropsObject(realm, arrayLikeObject);
+    }
+    invariant(false, "TODO");
   }
   return false;
 }
@@ -1184,6 +1196,24 @@ export function getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(re
       default:
         invariant(false, "TODO");
     }
+  } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+    let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+    invariant(temporalOperationEntry !== undefined);
+    let { args, operationDescriptor } = temporalOperationEntry;
+    if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
+      let [arrayLikeObject, methodProperty] = args;
+      invariant(methodProperty instanceof StringValue);
+      return `${getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm, arrayLikeObject)}.${
+        methodProperty.value
+      }`;
+    } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
+      let [nativeFunc, arrayLikeObject] = args;
+      return `${nativeFunc.intrinsicName}(${getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(
+        realm,
+        arrayLikeObject
+      )})`;
+    }
+    invariant(false, "TODO");
   }
   return false;
 }

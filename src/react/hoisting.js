@@ -10,6 +10,7 @@
 /* @flow */
 
 import { Realm } from "../realm.js";
+import { DeclarativeEnvironmentRecord, GlobalEnvironmentRecord, LexicalEnvironment } from "../environment.js";
 import {
   AbstractValue,
   ArrayValue,
@@ -77,6 +78,31 @@ function canHoistArray(
   return true;
 }
 
+function someBindingsAreCreatedOutOfScope(realm: Realm, bindings: Set<string>, scope: LexicalEnvironment): boolean {
+  let env = scope;
+  let bindingsFound = 0;
+  let totalBindings = bindings.size;
+
+  while (env !== null) {
+    let envRec = env.environmentRecord;
+
+    if (envRec instanceof DeclarativeEnvironmentRecord) {
+      let envBindings = envRec.bindings;
+
+      for (let bindingName of Object.keys(envBindings)) {
+        if (bindings.has(bindingName)) {
+          return true;
+        }
+      }
+    }
+    if (totalBindings === bindingsFound) {
+      return true;
+    }
+    env = env.parent;
+  }
+  return false;
+}
+
 export function flagFunctionForHoistingIfPossible(
   realm: Realm,
   func: FunctionValue,
@@ -105,7 +131,11 @@ export function flagFunctionForHoistingIfPossible(
     if (func instanceof ECMAScriptSourceFunctionValue) {
       let code = func.$ECMAScriptCode;
       let functionInfos = residualHeapVisitor.functionInfos.get(code);
-      if (functionInfos && functionInfos.unbound.size > 0 && !func.$Environment.destroyed) {
+      if (
+        functionInfos &&
+        functionInfos.unbound.size > 0 &&
+        someBindingsAreCreatedOutOfScope(realm, functionInfos.unbound, func.$Environment)
+      ) {
         return;
       }
     }
