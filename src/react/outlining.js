@@ -623,14 +623,43 @@ function cloneAndModelAbstractValue(
         return AbstractValue.createFromUnaryOp(realm, val.kind, clonedCondValue, hasPrefix);
       }
       case "||":
-      case "&&":
+      case "&&": {
         // Logical ops
         let [leftValue, rightValue] = val.args;
         let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
         let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
         return AbstractValue.createFromLogicalOp(realm, val.kind, clonedLeftValue, clonedRightValue);
+      }
       case "widened numeric property":
         return AbstractValue.createFromType(realm, Value, "widened numeric property", [...val.args]);
+      case "+":
+      case "-":
+      case "!=":
+      case "==":
+      case "===":
+      case "!==":
+      case "instanceof":
+      case "in":
+      case ">":
+      case "<":
+      case ">=":
+      case "<=":
+      case ">>>":
+      case ">>":
+      case "<<":
+      case "&":
+      case "|":
+      case "^":
+      case "**":
+      case "%":
+      case "/":
+      case "*": {
+        // Binary ops
+        let [leftValue, rightValue] = val.args;
+        let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
+        let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
+        return AbstractValue.createFromBinaryOp(realm, val.kind, clonedLeftValue, clonedRightValue);
+      }
       default:
         invariant(false, "TODO");
     }
