@@ -257,6 +257,7 @@ export class ReactEquivalenceSet {
     map: ReactSetValueMap,
     visitedValues: Set<Value>
   ): ReactSetNode {
+    invariant(object.isValid());
     let prop = getProperty(this.realm, object, propName);
     let isFinal = object.mightBeFinalObject();
     let equivalentProp;

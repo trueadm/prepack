@@ -1161,6 +1161,9 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
       case "COERCE_TO_STRING":
         // TODO: we might be able to handle this?
         return false;
+      case "OBJECT_ASSIGN":
+        // First arg is the source
+        return isTemporalValueDeeplyReferencingPropsObject(realm, args[1]);
       default:
         invariant(false, "TODO");
     }
@@ -1194,6 +1197,8 @@ export function getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(re
         // First arg is the parent object/abstract
         let propName = args[1] instanceof StringValue ? args[1].value : args[1];
         return `${getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm, args[0])}.${propName}`;
+      case "OBJECT_ASSIGN":
+        return undefined;
       default:
         invariant(false, "TODO");
     }

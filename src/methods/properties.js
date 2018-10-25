@@ -263,11 +263,6 @@ function isWidenedValue(v: void | Value) {
 export class PropertiesImplementation {
   // ECMA262 9.1.9.1
   OrdinarySet(realm: Realm, O: ObjectValue, P: PropertyKeyValue, V: Value, Receiver: Value): boolean {
-    // React value arrays are special and apply an internal property update when setting with them
-    if (realm.react.enabled && realm.react.reactValueArrays.has(O)) {
-      hardModifyReactObjectPropertyBinding(realm, O, P, V);
-      return true;
-    }
     ensureIsNotFinal(realm, O, P);
     if (!realm.ignoreLeakLogic && O.mightBeLeakedObject()) {
       // Leaking is transitive, hence writing a value to a leaked object leaks the value

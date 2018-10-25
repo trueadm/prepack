@@ -116,9 +116,9 @@ export default class AbstractValue extends Value {
     this.kind = optionalArgs ? optionalArgs.kind : undefined;
     this.shape = optionalArgs ? optionalArgs.shape : undefined;
     this.i = i++;
-    if (this.i === 36632) {
-      debugger;
-    }
+    // if (this.i === 81) {
+    //   debugger;
+    // }
   }
 
   hashValue: number;

@@ -65,6 +65,7 @@ export default function simplifyAndRefineAbstractValue(
 }
 
 function simplify(realm, value: Value, isCondition: boolean = false, depth: number): Value {
+  return value;
   if (value instanceof ConcreteValue || depth > 5) return value;
   invariant(value instanceof AbstractValue);
   if (isCondition || value.getType() === BooleanValue) {

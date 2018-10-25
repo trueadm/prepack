@@ -80,7 +80,7 @@ export default class ObjectValue extends ConcreteValue {
     // as a proxy for whether initialization is still ongoing.
     this.$IsClassPrototype = false;
     this.i = i++;
-    // if (this.i === 3738) {
+    // if (this.i === 754) {
     //   debugger;
     // }
   }
