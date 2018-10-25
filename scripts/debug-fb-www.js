@@ -75,7 +75,7 @@ let prepackOptions = {
   maxStackDepth: 200,
   instantRender: false,
   reactEnabled: true,
-  reactOutput: "jsx",
+  reactOutput: "create-element",
   reactVerbose: true,
   reactFailOnUnsupportedSideEffects: true,
   reactOptimizeNestedFunctions: true,

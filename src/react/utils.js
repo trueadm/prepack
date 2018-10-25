@@ -1142,7 +1142,7 @@ export function hardModifyReactObjectPropertyBinding(
   object.properties.set(propName, newBinding);
 }
 
-export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: Value): boolean {
+export function isTemporalValueDeeplyReferencingKnownObject(realm: Realm, val: Value): boolean {
   if (realm.react.propsWithNoPartialKeyOrRef.has(val) || realm.react.reactProps.has(val)) {
     return true;
   }
@@ -1154,16 +1154,19 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
       case "ABSTRACT_PROPERTY":
       case "ABSTRACT_OBJECT_GET":
         // First arg is the parent object/abstract
-        return isTemporalValueDeeplyReferencingPropsObject(realm, args[0]);
+        return isTemporalValueDeeplyReferencingKnownObject(realm, args[0]);
       case "CALL_BAILOUT":
         return false;
       case "BINARY_EXPRESSION":
+        let [leftValue, rightValue] = args;
+        debugger;
+        break;
       case "COERCE_TO_STRING":
-        // TODO: we might be able to handle this?
-        return false;
+        debugger;
+        break;
       case "OBJECT_ASSIGN":
         // First arg is the source
-        return isTemporalValueDeeplyReferencingPropsObject(realm, args[1]);
+        return isTemporalValueDeeplyReferencingKnownObject(realm, args[1]);
       default:
         invariant(false, "TODO");
     }
@@ -1173,10 +1176,10 @@ export function isTemporalValueDeeplyReferencingPropsObject(realm: Realm, val: V
     let { args, operationDescriptor } = temporalOperationEntry;
     if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
       let [arrayLikeObject] = args;
-      return isTemporalValueDeeplyReferencingPropsObject(realm, arrayLikeObject);
+      return isTemporalValueDeeplyReferencingKnownObject(realm, arrayLikeObject);
     } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
       let [, arrayLikeObject] = args;
-      return isTemporalValueDeeplyReferencingPropsObject(realm, arrayLikeObject);
+      return isTemporalValueDeeplyReferencingKnownObject(realm, arrayLikeObject);
     }
     invariant(false, "TODO");
   }

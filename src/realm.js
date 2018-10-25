@@ -333,6 +333,7 @@ export class Realm {
       reactElements: new WeakMap(),
       reactElementStringTypeReferences: new Map(),
       reactProps: new WeakSet(),
+      runtimeValueIndex: 0,
       symbols: new Map(),
       usedOutlinedValuesArray: false,
       usedReactElementKeys: new Set(),
@@ -443,6 +444,7 @@ export class Realm {
     reactElements: WeakMap<ObjectValue, { createdDuringReconcilation: boolean, firstRenderOnly: boolean }>,
     reactElementStringTypeReferences: Map<string, AbstractValue>,
     reactProps: WeakSet<ObjectValue>,
+    runtimeValueIndex: number,
     symbols: Map<ReactSymbolTypes, SymbolValue>,
     usedOutlinedValuesArray: boolean,
     usedReactElementKeys: Set<string>,
@@ -1075,6 +1077,7 @@ export class Realm {
     alternateEffectsFunc: () => Effects
   ): Value {
     let effects;
+    let saved_runtimeValueIndex = this.react.runtimeValueIndex;
     if (Path.implies(condValue)) {
       effects = consequentEffectsFunc();
     } else if (Path.impliesNot(condValue)) {
@@ -1106,7 +1109,7 @@ export class Realm {
       }
     }
     this.applyEffects(effects);
-
+    this.react.runtimeValueIndex = saved_runtimeValueIndex;
     return condValue.$Realm.returnOrThrowCompletion(effects.result);
   }
 

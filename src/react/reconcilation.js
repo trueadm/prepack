@@ -228,6 +228,7 @@ export class Reconciler {
     if (rootValue instanceof SymbolValue) {
       return;
     }
+    debugger;
     invariant(rootValue instanceof ECMAScriptSourceFunctionValue || rootValue instanceof AbstractValue);
     this.componentTreeState.deadEnds++;
     let componentType = getComponentTypeFromRootValue(this.realm, rootValue);
@@ -958,7 +959,7 @@ export class Reconciler {
     let typeValue = getProperty(this.realm, reactElement, "type");
     let propsValue = getProperty(this.realm, reactElement, "props");
 
-    this._findReactComponentTrees(propsValue, evaluatedNode, "NORMAL_FUNCTIONS", componentType, context, branchStatus);
+    // this._findReactComponentTrees(propsValue, evaluatedNode, "NORMAL_FUNCTIONS", componentType, context, branchStatus);
     if (typeValue instanceof AbstractValue) {
       this._findReactComponentTrees(
         typeValue,
