@@ -47,7 +47,7 @@ export function GlobalDeclarationInstantiation(
   // 4. Let varNames be the VarDeclaredNames of script.
   let varNames = [];
 
-  traverseFast(ast, null, node => {
+  traverseFast(ast, node => {
     if (node.type === "VariableDeclaration") {
       if (((node: any): BabelNodeVariableDeclaration).kind === "var") {
         varNames = varNames.concat(Environment.BoundNames(realm, node));

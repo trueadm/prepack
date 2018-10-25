@@ -295,8 +295,6 @@ export class Realm {
     this.moduleFactoryFunctionsToRemove = new Map();
     this.tracers = [];
 
-    this.astNodeParents = new Map();
-
     // These get initialized in construct_realm to avoid the dependency
     this.intrinsics = ({}: any);
     this.$GlobalObject = (({}: any): ObjectValue);
@@ -398,8 +396,6 @@ export class Realm {
   savedCompletion: void | JoinedNormalAndAbruptCompletions;
 
   activeLexicalEnvironments: Set<LexicalEnvironment>;
-
-  astNodeParents: Map<BabelNode, BabelNode>;
 
   // A set of abstract conditions that are known to be true in the current execution path.
   // For example, the abstract condition of an if statement is known to be true inside its true branch.

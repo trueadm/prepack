@@ -470,7 +470,7 @@ export class FunctionImplementation {
 
     // 11. Let varNames be the VarDeclaredNames of code.
     let varNames = [];
-    traverseFast(code, null, node => {
+    traverseFast(code, node => {
       if (node.type === "VariableDeclaration" && ((node: any): BabelNodeVariableDeclaration).kind === "var") {
         varNames = varNames.concat(Object.keys(t.getBindingIdentifiers(node)));
       }
@@ -1295,7 +1295,7 @@ export class FunctionImplementation {
   ): Value {
     // 1. Let varNames be the VarDeclaredNames of body.
     let varNames = [];
-    traverseFast(body, null, node => {
+    traverseFast(body, node => {
       if (node.type === "VariableDeclaration" && ((node: any): BabelNodeVariableDeclaration).kind === "var") {
         varNames = varNames.concat(Object.keys(t.getBindingIdentifiers(node)));
       }

@@ -903,7 +903,7 @@ export class CreateImplementation {
       // a. If parameters Contains YieldExpression is true, throw a SyntaxError exception.
       let containsYield = false;
       for (let param of params) {
-        traverseFast(param, null, node => {
+        traverseFast(param, node => {
           if (node.type === "YieldExpression") {
             containsYield = true;
             return true;

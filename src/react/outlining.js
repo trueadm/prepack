@@ -37,11 +37,8 @@ import {
 import { Functions, Properties } from "../singletons.js";
 import { cloneDescriptor, PropertyDescriptor } from "../descriptors.js";
 import { createOperationDescriptor } from "../utils/generator.js";
-import { getInitialProps } from "./components.js";
-import traverseFast from "../utils/traverse-fast.js";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
-import generate from "@babel/generator";
 
 function collectRuntimeValuesFromFunctionValue(
   realm: Realm,
@@ -79,190 +76,6 @@ function collectRuntimeValuesFromFunctionValue(
       }
     }
     env = env.parent;
-  }
-}
-
-function collectRuntimeValuesFromArrayWithNumericWidenedProperty(
-  realm: Realm,
-  val: ConcreteValue,
-  runtimeValues: Set<Value>,
-  possibleDeadCodeValues: Set<Value>,
-  effects: Effects
-): void {
-  let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
-  invariant(temporalOperationEntry !== undefined);
-  let { args, operationDescriptor } = temporalOperationEntry;
-  if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
-    let [arrayLikeObject, methodProperty, callbackfn] = args;
-    invariant(methodProperty instanceof StringValue);
-    // For now we only support nested optimized functions on map and filter
-    if (methodProperty.value === "map" || methodProperty.value === "filter") {
-      collectRuntimeValuesFromFunctionValue(realm, callbackfn, runtimeValues, possibleDeadCodeValues, effects);
-      // First arg is the referencing array
-      possibleDeadCodeValues.add(val);
-      if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayLikeObject)) {
-        collectRuntimeValuesFromArrayWithNumericWidenedProperty(
-          realm,
-          arrayLikeObject,
-          runtimeValues,
-          possibleDeadCodeValues,
-          effects
-        );
-      } else {
-        collectRuntimeValuesFromValue(realm, arrayLikeObject, runtimeValues, possibleDeadCodeValues, effects);
-      }
-      return;
-    }
-  } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
-    let [, arrayLikeObject] = args;
-    possibleDeadCodeValues.add(val);
-    if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayLikeObject)) {
-      collectRuntimeValuesFromArrayWithNumericWidenedProperty(
-        realm,
-        arrayLikeObject,
-        runtimeValues,
-        possibleDeadCodeValues,
-        effects
-      );
-    } else {
-      collectRuntimeValuesFromValue(realm, arrayLikeObject, runtimeValues, possibleDeadCodeValues, effects);
-    }
-    return;
-  }
-  runtimeValues.add(val);
-}
-
-function collectRuntimeValuesFromConcreteValue(
-  realm: Realm,
-  val: ConcreteValue,
-  runtimeValues: Set<Value>,
-  possibleDeadCodeValues: Set<Value>,
-  effects: Effects
-): void {
-  // if (val.astNode && val.astNode.start === 61236) {
-  //   debugger;
-  // }
-  if (val instanceof ObjectValue) {
-    if (!effects.createdObjects.has(val)) {
-      // If this object was created outside of the function,
-      // then we already know its values
-      return;
-    }
-    for (let [propName, binding] of val.properties) {
-      if (binding && binding.descriptor) {
-        if (propName === "callee" || propName === "prototype") {
-          // Given we don't support cloning functions now, we only check this for other objects
-          if (val instanceof FunctionValue) {
-            continue;
-          }
-          invariant(false, "TODO support prototype and callee for non-function objects");
-        }
-        let propVal = binding.descriptor.value;
-        invariant(propVal instanceof Value);
-        collectRuntimeValuesFromValue(realm, propVal, runtimeValues, possibleDeadCodeValues, effects);
-      }
-    }
-    if (val instanceof FunctionValue) {
-      collectRuntimeValuesFromFunctionValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
-    } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
-      collectRuntimeValuesFromArrayWithNumericWidenedProperty(
-        realm,
-        val,
-        runtimeValues,
-        possibleDeadCodeValues,
-        effects
-      );
-    } else {
-      invariant(
-        val.$Prototype === realm.intrinsics.ObjectPrototype || val.$Prototype === realm.intrinsics.ArrayPrototype
-      );
-    }
-  }
-}
-
-function getConcreteObjectValuesFromBranch(branch: Value, concreteValues: Set<Value>): void {
-  if (branch instanceof ObjectValue) {
-    concreteValues.add(branch);
-  } else if (
-    branch instanceof AbstractValue &&
-    (branch.type === "conditional" || branch.type === "||" || branch.type === "&&")
-  ) {
-    for (let arg of branch.args) {
-      getConcreteObjectValuesFromBranch(arg, concreteValues);
-    }
-  }
-}
-
-function collectRuntimeValuesFromAbstractValue(
-  realm: Realm,
-  val: AbstractValue,
-  runtimeValues: Set<Value>,
-  possibleDeadCodeValues: Set<Value>,
-  effects: Effects
-): void {
-  // if (val.astNode && val.astNode.start === 71656) {
-  //   debugger;
-  // }
-  if (!effects.createdAbstracts.has(val)) {
-    return val;
-  }
-  if (runtimeValues.has(val)) {
-    return;
-  }
-  if (valueIsKnownReactAbstraction(realm, val)) {
-    invariant(false, "TODO");
-  }
-  if (val.isTemporal()) {
-    // If this property reference is ultimately to a React props object,
-    // then we can re-create the temporal chain (without creating runtime values.
-    // We can re-model the property access as "props.a.b.c.d" instead.)
-    if (isTemporalValueDeeplyReferencingPropsObject(realm, val)) {
-      return;
-    }
-    runtimeValues.add(val);
-  } else if (val.kind === "conditional") {
-    let [condValue, consequentVal, alternateVal] = val.args;
-
-    // runtimeValues.add(condValue);
-    collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
-    collectRuntimeValuesFromValue(realm, consequentVal, runtimeValues, possibleDeadCodeValues, effects);
-    collectRuntimeValuesFromValue(realm, alternateVal, runtimeValues, possibleDeadCodeValues, effects);
-  } else if (val.kind === "||" || val.kind === "&&") {
-    let [condValue, rightVal] = val.args;
-
-    // let concreteValues = new Set();
-    // getConcreteObjectValuesFromBranch(condValue, concreteValues);
-    // if (concreteValues.size > 0) {
-    //   collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
-    // } else {
-    //   runtimeValues.add(condValue);
-    // }
-    collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
-    collectRuntimeValuesFromValue(realm, rightVal, runtimeValues, possibleDeadCodeValues, effects);
-  } else if (isAbstractValueBinaryExpression(val) || isAbstractValueUnaryExpression(val)) {
-    runtimeValues.add(val);
-  } else if (val.kind !== undefined && val.kind.startsWith("template:")) {
-    // We can clone templates
-  } else if (val.args.length > 0) {
-    for (let arg of val.args) {
-      collectRuntimeValuesFromValue(realm, arg, runtimeValues, possibleDeadCodeValues, effects);
-    }
-  } else {
-    invariant(false, "TODO");
-  }
-}
-
-function collectRuntimeValuesFromValue(
-  realm: Realm,
-  val: Value,
-  runtimeValues: Set<Value>,
-  possibleDeadCodeValues: Set<Value>,
-  effects: Effects
-): void {
-  if (val instanceof ConcreteValue) {
-    collectRuntimeValuesFromConcreteValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
-  } else {
-    collectRuntimeValuesFromAbstractValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
   }
 }
 
@@ -314,7 +127,7 @@ function cloneAndModelObjectPropertyDescriptor(
   object: ObjectValue,
   clonedObject: ObjectValue,
   desc: PropertyDescriptor,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): PropertyDescriptor {
   let clonedDesc = cloneDescriptor(desc);
@@ -324,7 +137,7 @@ function cloneAndModelObjectPropertyDescriptor(
     if (value === object) {
       value = clonedObject;
     }
-    let clonedValue = cloneAndModelValue(realm, value, runtimeValuesMapping, effects);
+    let clonedValue = cloneAndModelValue(realm, value, runtimeValueNameMap, effects);
     clonedDesc.value = clonedValue;
   } else {
     invariant(false, "// TODO handle get/set in cloneAndModelObjectPropertyDescriptor");
@@ -380,7 +193,7 @@ function cloneAndModelFunctionScopeForBindings(
   realm: Realm,
   scope: LexicalEnvironment,
   bindings: Set<string>,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ) {
   let env = new LexicalEnvironment(realm);
@@ -395,7 +208,7 @@ function cloneAndModelFunctionScopeForBindings(
       if (binding !== null && binding.value !== undefined) {
         let clonedBinding = Object.assign({}, binding);
         clonedBinding.environment = dclRec;
-        clonedBinding.value = cloneAndModelValue(realm, binding.value, runtimeValuesMapping, effects);
+        clonedBinding.value = cloneAndModelValue(realm, binding.value, runtimeValueNameMap, effects);
         dclRec.bindings[bindingName] = clonedBinding;
       }
     }
@@ -407,7 +220,7 @@ function cloneAndModelFunctionScopeForBindings(
 function cloneAndModelFunctionValue(
   realm: Realm,
   val: ECMAScriptSourceFunctionValue,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): ECMAScriptSourceFunctionValue {
   let bindings = new Set();
@@ -425,7 +238,7 @@ function cloneAndModelFunctionValue(
     realm,
     val.$Environment,
     bindings,
-    runtimeValuesMapping,
+    runtimeValueNameMap,
     effects
   );
   let clonedFunction = Functions.FunctionCreate(realm, val.$FunctionKind, params, body, clonedScope, val.$Strict);
@@ -436,7 +249,7 @@ function cloneObjectProperties(
   realm: Realm,
   clonedObject: ObjectValue,
   val: ObjectValue,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): void {
   // TODO do symbols
@@ -454,7 +267,7 @@ function cloneObjectProperties(
       val,
       clonedObject,
       descriptor,
-      runtimeValuesMapping,
+      runtimeValueNameMap,
       effects
     );
     Properties.OrdinaryDefineOwnProperty(realm, clonedObject, propName, desc);
@@ -469,12 +282,12 @@ function cloneObjectProperties(
         val,
         clonedObject,
         unknownProperty.descriptor,
-        runtimeValuesMapping,
+        runtimeValueNameMap,
         effects
       );
     }
     if (unknownProperty.key !== undefined) {
-      key = cloneAndModelValue(realm, unknownProperty.key, runtimeValuesMapping, effects);
+      key = cloneAndModelValue(realm, unknownProperty.key, runtimeValueNameMap, effects);
     }
     clonedObject.unknownProperty = {
       descriptor: desc,
@@ -544,7 +357,7 @@ function cloneAndModelArrayWithNumericWidenedProperty(
 function cloneAndModelObjectValue(
   realm: Realm,
   val: ObjectValue,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): Value {
   if (!effects.createdObjects.has(val)) {
@@ -552,11 +365,11 @@ function cloneAndModelObjectValue(
   }
   if (val instanceof ArrayValue) {
     if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
-      return cloneAndModelArrayWithNumericWidenedProperty(realm, val, runtimeValuesMapping, effects);
+      return cloneAndModelArrayWithNumericWidenedProperty(realm, val, runtimeValueNameMap, effects);
     }
     invariant(val.$Prototype === realm.intrinsics.ArrayPrototype);
     let clonedObject = new ArrayValue(realm);
-    cloneObjectProperties(realm, clonedObject, val, runtimeValuesMapping, effects);
+    cloneObjectProperties(realm, clonedObject, val, runtimeValueNameMap, effects);
     applyPostValueConfig(realm, val, clonedObject);
     return clonedObject;
   } else if (val instanceof FunctionValue) {
@@ -564,11 +377,11 @@ function cloneAndModelObjectValue(
       invariant(false, "TODO");
     }
     invariant(val instanceof ECMAScriptSourceFunctionValue);
-    return cloneAndModelFunctionValue(realm, val, runtimeValuesMapping, effects);
+    return cloneAndModelFunctionValue(realm, val, runtimeValueNameMap, effects);
   }
   invariant(val.$Prototype === realm.intrinsics.ObjectPrototype);
   let clonedObject = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
-  cloneObjectProperties(realm, clonedObject, val, runtimeValuesMapping, effects);
+  cloneObjectProperties(realm, clonedObject, val, runtimeValueNameMap, effects);
   applyPostValueConfig(realm, val, clonedObject);
   return clonedObject;
 }
@@ -576,7 +389,7 @@ function cloneAndModelObjectValue(
 function cloneAndModelAbstractTemporalValue(
   realm: Realm,
   val: AbstractValue,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): AbstractValue {
   let intrinsicName = getIntrinsicNameFromTemporalValueDeeplyReferencingPropsObject(realm, val);
@@ -590,7 +403,7 @@ function cloneAndModelAbstractTemporalValue(
   let { args, operationDescriptor } = temporalOperationEntry;
   switch (operationDescriptor.type) {
     case "ABSTRACT_PROPERTY": {
-      let clonedTemporalArgs = args.map(arg => cloneAndModelValue(realm, arg, runtimeValuesMapping, effects));
+      let clonedTemporalArgs = args.map(arg => cloneAndModelValue(realm, arg, runtimeValueNameMap, effects));
       let abstractValue = AbstractValue.createTemporalFromBuildFunction(
         realm,
         val.getType(),
@@ -603,7 +416,7 @@ function cloneAndModelAbstractTemporalValue(
     }
     case "ABSTRACT_OBJECT_GET": {
       let propertyGetter = operationDescriptor.data.propertyGetter;
-      let clonedTemporalArgs = args.map(arg => cloneAndModelValue(realm, arg, runtimeValuesMapping, effects));
+      let clonedTemporalArgs = args.map(arg => cloneAndModelValue(realm, arg, runtimeValueNameMap, effects));
       let abstractValue = AbstractValue.createTemporalFromBuildFunction(
         realm,
         val.getType(),
@@ -626,27 +439,27 @@ function cloneAndModelAbstractTemporalValue(
 function cloneAndModelAbstractValue(
   realm: Realm,
   val: AbstractValue,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): Value {
   if (!effects.createdAbstracts.has(val)) {
     return val;
   }
   if (val.isTemporal()) {
-    return cloneAndModelAbstractTemporalValue(realm, val, runtimeValuesMapping, effects);
+    return cloneAndModelAbstractTemporalValue(realm, val, runtimeValueNameMap, effects);
   } else if (val.kind !== undefined) {
     if (val.kind.startsWith("template:")) {
       let source = val.kind.replace("template:", "");
-      let clonedArgs = val.args.map(arg => cloneAndModelValue(realm, arg, runtimeValuesMapping, effects));
+      let clonedArgs = val.args.map(arg => cloneAndModelValue(realm, arg, runtimeValueNameMap, effects));
       return AbstractValue.createFromTemplate(realm, source, val.getType(), clonedArgs);
     } else if (isAbstractValueBinaryExpression(val)) {
       let [leftValue, rightValue] = val.args;
-      let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
-      let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
+      let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValueNameMap, effects);
+      let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValueNameMap, effects);
       return AbstractValue.createFromBinaryOp(realm, val.kind, clonedLeftValue, clonedRightValue);
     } else if (isAbstractValueUnaryExpression(val)) {
       let [condValue] = val.args;
-      let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValuesMapping, effects);
+      let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValueNameMap, effects);
       invariant(val.operationDescriptor !== undefined);
       invariant(clonedCondValue instanceof AbstractValue);
       let hasPrefix = val.operationDescriptor.data.prefix;
@@ -656,16 +469,16 @@ function cloneAndModelAbstractValue(
       case "conditional": {
         let [condValue, consequentVal, alternateVal] = val.args;
 
-        let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValuesMapping, effects);
-        let clonedConsequentVal = cloneAndModelValue(realm, consequentVal, runtimeValuesMapping, effects);
-        let clonedAlternateVal = cloneAndModelValue(realm, alternateVal, runtimeValuesMapping, effects);
+        let clonedCondValue = cloneAndModelValue(realm, condValue, runtimeValueNameMap, effects);
+        let clonedConsequentVal = cloneAndModelValue(realm, consequentVal, runtimeValueNameMap, effects);
+        let clonedAlternateVal = cloneAndModelValue(realm, alternateVal, runtimeValueNameMap, effects);
         return AbstractValue.createFromConditionalOp(realm, clonedCondValue, clonedConsequentVal, clonedAlternateVal);
       }
       case "||":
       case "&&":
         let [leftValue, rightValue] = val.args;
-        let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValuesMapping, effects);
-        let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValuesMapping, effects);
+        let clonedLeftValue = cloneAndModelValue(realm, leftValue, runtimeValueNameMap, effects);
+        let clonedRightValue = cloneAndModelValue(realm, rightValue, runtimeValueNameMap, effects);
         return AbstractValue.createFromLogicalOp(realm, val.kind, clonedLeftValue, clonedRightValue);
         break;
       case "widened numeric property":
@@ -680,12 +493,12 @@ function cloneAndModelAbstractValue(
 function cloneAndModelValue(
   realm: Realm,
   val: Value,
-  runtimeValuesMapping: Map<Value, string>,
+  runtimeValueNameMap: Map<Value, string>,
   effects: Effects
 ): Value {
-  if (runtimeValuesMapping.has(val)) {
+  if (runtimeValueNameMap.has(val)) {
     let runtimeValue = AbstractValue.createFromType(realm, Value, "outlined abstract intrinsic", []);
-    let intrinsicName = runtimeValuesMapping.get(val);
+    let intrinsicName = runtimeValueNameMap.get(val);
     invariant(intrinsicName !== undefined);
     runtimeValue.intrinsicName = intrinsicName;
     return runtimeValue;
@@ -694,159 +507,10 @@ function cloneAndModelValue(
     if (val instanceof PrimitiveValue) {
       return val;
     } else if (val instanceof ObjectValue) {
-      return cloneAndModelObjectValue(realm, val, runtimeValuesMapping, effects);
+      return cloneAndModelObjectValue(realm, val, runtimeValueNameMap, effects);
     }
   } else if (val instanceof AbstractValue) {
-    return cloneAndModelAbstractValue(realm, val, runtimeValuesMapping, effects);
-  }
-}
-
-function wrapBabelNodeInRuntimeTransform(astNode: BabelNode) {
-  return t.assignmentExpression(
-    "=",
-    t.memberExpression(t.identifier("__rv"), t.updateExpression("++", t.identifier("__ri")), true),
-    astNode
-  );
-}
-
-function applyBabelTransformForRuntimeValuesOnAstNode(
-  realm: Realm,
-  astNode: BabelNode,
-  mustWrap?: boolean = false
-): void {
-  let astNodeParent = realm.astNodeParents.get(astNode);
-  invariant(astNodeParent !== undefined);
-
-  if (t.isMemberExpression(astNodeParent)) {
-    if (mustWrap) {
-      invariant(false, "Should never happen");
-    }
-    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
-  } else if (t.isCallExpression(astNodeParent)) {
-    if (mustWrap) {
-      invariant(false, "Should never happen");
-    }
-    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
-  } else if (t.isJSXExpressionContainer(astNodeParent)) {
-    astNodeParent.expression = wrapBabelNodeInRuntimeTransform(astNode);
-  } else if (t.isJSXSpreadAttribute(astNodeParent)) {
-    astNodeParent.argument = wrapBabelNodeInRuntimeTransform(astNode);
-  } else if (t.isIfStatement(astNodeParent)) {
-    if (astNodeParent.test === astNode) {
-      astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
-    } else if (astNodeParent.consequent === astNode) {
-      astNodeParent.consequent = wrapBabelNodeInRuntimeTransform(astNode);
-    } else if (astNodeParent.alternate === astNode) {
-      astNodeParent.alternate = wrapBabelNodeInRuntimeTransform(astNode);
-    }
-  } else if (t.isVariableDeclarator(astNodeParent)) {
-    astNodeParent.init = wrapBabelNodeInRuntimeTransform(astNode);
-  } else if (t.isLogicalExpression(astNodeParent)) {
-    if (mustWrap) {
-      if (astNodeParent.left === astNode) {
-        astNodeParent.left = wrapBabelNodeInRuntimeTransform(astNode);
-      } else if (astNodeParent.right === astNode) {
-        astNodeParent.right = wrapBabelNodeInRuntimeTransform(astNode);
-      }
-    } else {
-      applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
-    }
-  } else if (t.isConditionalExpression(astNodeParent)) {
-    if (astNodeParent.test === astNode) {
-      astNodeParent.test = wrapBabelNodeInRuntimeTransform(astNode);
-    } else if (astNodeParent.consequent === astNode) {
-      astNodeParent.consequent = wrapBabelNodeInRuntimeTransform(astNode);
-    } else if (astNodeParent.alternate === astNode) {
-      astNodeParent.alternate = wrapBabelNodeInRuntimeTransform(astNode);
-    }
-  } else if (t.isBinaryExpression(astNodeParent)) {
-    if (mustWrap) {
-      invariant(false, "Should never happen");
-    }
-    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
-  } else if (t.isReturnStatement(astNodeParent)) {
-    astNodeParent.argument = wrapBabelNodeInRuntimeTransform(astNode);
-  } else if (t.isObjectProperty(astNodeParent)) {
-    astNodeParent.value = wrapBabelNodeInRuntimeTransform(astNode);
-  } else if (t.isUnaryExpression(astNodeParent)) {
-    if (mustWrap) {
-      invariant(false, "Should never happen");
-    }
-    applyBabelTransformForRuntimeValuesOnAstNode(realm, astNodeParent);
-  } else if (t.isAssignmentExpression(astNodeParent)) {
-    astNodeParent.right = astNode;
-  } else if (t.isArrayExpression(astNodeParent)) {
-    for (let i = 0; i < astNodeParent.elements.length; i++) {
-      let element = astNodeParent.elements[i];
-      if (element === astNode) {
-        astNodeParent.elements[i] = wrapBabelNodeInRuntimeTransform(astNode);
-        break;
-      }
-    }
-  } else if (t.isArrowFunctionExpression(astNodeParent)) {
-    astNodeParent.body = wrapBabelNodeInRuntimeTransform(astNode);
-  } else {
-    invariant(false, "TODO");
-  }
-}
-
-function wrapBabelNodeInDeadcodeTransform(astNode: BabelNode) {
-  return t.callExpression(t.identifier("__possibleDeadCode"), [astNode]);
-}
-
-function applyBabelTransformForDeadCodeOnAstNode(realm: Realm, astNode: BabelNode): void {
-  let astNodeParent = realm.astNodeParents.get(astNode);
-  invariant(astNodeParent !== undefined);
-
-  if (t.isMemberExpression(astNodeParent)) {
-    applyBabelTransformForDeadCodeOnAstNode(realm, astNodeParent);
-  } else if (t.isCallExpression(astNodeParent)) {
-    applyBabelTransformForDeadCodeOnAstNode(realm, astNodeParent);
-  } else if (t.isVariableDeclarator(astNodeParent)) {
-    if (astNodeParent.init === astNode) {
-      astNodeParent.init = wrapBabelNodeInDeadcodeTransform(astNode);
-    } else {
-      invariant(false, "TODO not possible to get here?");
-    }
-  } else {
-    invariant(false, "TODO");
-  }
-}
-
-function applyBabelTransformsWithRuntimeValues(
-  realm: Realm,
-  runtimeValues: Set<Value>,
-  possibleDeadCodeValues: Set<Value>
-): void {
-  const markContainingFunction = astNode => {
-    while (astNode !== undefined) {
-      if (t.isFunctionExpression(astNode) || t.isFunctionDeclaration(astNode)) {
-        realm.react.outlinedFunctionAstNodes.add(astNode);
-        break;
-      }
-      astNode = realm.astNodeParents.get(astNode);
-    }
-  };
-
-  for (let runtimeValue of runtimeValues) {
-    let astNode = runtimeValue.astNode;
-    invariant(astNode !== undefined);
-    if (
-      runtimeValue instanceof AbstractValue &&
-      (runtimeValue.kind === "||" || runtimeValue.kind === "&&") &&
-      (t.isLogicalExpression(astNode) || t.isCallExpression(astNode))
-    ) {
-      applyBabelTransformForRuntimeValuesOnAstNode(realm, astNode, true);
-    } else {
-      applyBabelTransformForRuntimeValuesOnAstNode(realm, astNode, false);
-    }
-    markContainingFunction(astNode);
-  }
-  for (let possibleDeadCodeValue of possibleDeadCodeValues) {
-    let astNode = possibleDeadCodeValue.astNode;
-    invariant(astNode !== undefined);
-    // applyBabelTransformForDeadCodeOnAstNode(realm, astNode);
-    markContainingFunction(astNode);
+    return cloneAndModelAbstractValue(realm, val, runtimeValueNameMap, effects);
   }
 }
 
@@ -873,7 +537,7 @@ function getValueAndEffectsFromFunctionCall(realm: Realm, func: ECMAScriptSource
   return [effects, result];
 }
 
-function setupEnvironmentForOutlining(realm: Realm) {
+function setupEnvironmentForOutlining(realm: Realm, collectedRuntimeValues: Set<Value>) {
   realm.react.usedOutlinedValuesArray = true;
   // ensure we define a global value for bindings __rv and __ri in Prepack
   let globalObject = realm.$GlobalObject;
@@ -906,6 +570,18 @@ function setupEnvironmentForOutlining(realm: Realm) {
     })
   );
   globalObject.$DefineOwnProperty(
+    "__rd",
+    new PropertyDescriptor({
+      value: new NativeFunctionValue(realm, undefined, undefined, 0, (context, [id, val]) => {
+        collectedRuntimeValues.set(val, id.value);
+        return val;
+      }),
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    })
+  );
+  globalObject.$DefineOwnProperty(
     "__possibleDeadCode",
     new PropertyDescriptor({
       value: new NativeFunctionValue(realm, undefined, undefined, 0, (context, [val]) => {
@@ -929,11 +605,6 @@ function shallowCloneFunctionValue(realm: Realm, func: ECMAScriptSourceFunctionV
   invariant(func.isValid());
   let clonedFunc = Functions.FunctionCreate(realm, func.$FunctionKind, params, body, func.$Environment, func.$Strict);
   realm.react.originalFuncToClonedFunc.set(func, clonedFunc);
-  realm.astNodeParents.set(body, t.functionExpression(t.identifier("__shallowCloneFunctionValue__"), params, body));
-  traverseFast(body, null, (node, parentNode) => {
-    if (parentNode !== null) realm.astNodeParents.set(node, parentNode);
-    if (!t.isIdentifier(node)) return false;
-  });
   return clonedFunc;
 }
 
@@ -953,137 +624,6 @@ function deeplyMakeAllArgsFinal(realm: Realm, args: Array<Value>): void {
   for (let arg of args) {
     deeplyMakeArgFinal(realm, arg);
   }
-}
-
-function shouldInlineFunctionalComponent(
-  realm: Realm,
-  func: ECMAScriptSourceFunctionValue,
-  args: Array<Value>
-): boolean {
-  let [, result] = getValueAndEffectsFromFunctionCall(
-    realm,
-    () => {
-      setupEnvironmentForOutlining(realm);
-      return func;
-    },
-    args
-  );
-
-  // If the result is primitive, we always inline the function call.
-  if (result instanceof PrimitiveValue) {
-    return true;
-  }
-  return false;
-}
-
-function createRuntimeValuesAndApplyBabelTransform(realm: Realm, func: ECMAScriptSourceFunctionValue): Set<Values> {
-  if (realm.react.outlinedFunctionInformation.has(func)) {
-    let runtimeValues = realm.react.outlinedFunctionInformation.get(func);
-    invariant(runtimeValues !== undefined);
-    return runtimeValues;
-  }
-  let args = [getInitialProps(realm, func, {})];
-  let [effects, result] = getValueAndEffectsFromFunctionCall(realm, func, args);
-  let runtimeValues = new Set();
-  let possibleDeadCodeValues = new Set();
-
-  applyPreviousEffects(realm, effects, () => {
-    collectRuntimeValuesFromValue(realm, result, runtimeValues, possibleDeadCodeValues, effects);
-  });
-  applyBabelTransformsWithRuntimeValues(realm, runtimeValues, possibleDeadCodeValues);
-
-  realm.react.outlinedFunctionInformation.set(func, runtimeValues);
-  return runtimeValues;
-}
-
-export function getValueFromOutlinedFunctionComponent(
-  realm: Realm,
-  func: ECMAScriptSourceFunctionValue,
-  args: Array<Value>,
-  isRoot: boolean
-): Value {
-  const returnValue = value => {
-    let completion = new SimpleNormalCompletion(value);
-    return realm.returnOrThrowCompletion(completion);
-  };
-  // 1. Create a clone of the original function if this is the root of the component tree.
-  // Also make all the props deeply final (a constrain added to React component props)
-  let clonedFunc;
-  if (isRoot) {
-    // clonedFunc = shallowCloneFunctionValue(realm, func);
-  }
-  deeplyMakeAllArgsFinal(realm, args);
-
-  // 2. First check if the component render can be inlined
-  if (shouldInlineFunctionalComponent(realm, clonedFunc || func, args)) {
-    return getValueFromFunctionCall(realm, func, realm.intrinsics.undefined, args);
-  }
-
-  // 3. Now we need to find all the runtime values for the given function.
-  // Furthermore, we apply code transforms so that runtime values are collected.
-  // If this was done on the same function at a previous point this will be a no-op.
-  let runtimeValues = createRuntimeValuesAndApplyBabelTransform(realm, clonedFunc || func);
-
-  printAst();
-  // 4. Evaluate the component render again, this time with the args we were given.
-  // Furthermore, we are now evaluating code that has had code transforms applied.
-  let [babelTransformedEffects, babelTransformedResult] = getValueAndEffectsFromFunctionCall(
-    realm,
-    () => {
-      setupEnvironmentForOutlining(realm);
-      return clonedFunc || func;
-    },
-    args
-  );
-
-  // 5. Generate a set of variable references for each of the runtime variables
-  // and map the variable references to the new values
-  let runtimeValueReferenceNames;
-  let runtimeValuesMapping = new Map();
-
-  applyPreviousEffects(realm, babelTransformedEffects, () => {
-    let reactValues = Get(realm, realm.$GlobalObject, "__rv");
-    let totalValues = reactValues.properties.size;
-
-    runtimeValueReferenceNames = Array.from(Array(totalValues)).map(() =>
-      realm.preludeGenerator.nameGenerator.generate("outlined")
-    );
-
-    for (let i = 0; i < totalValues; i++) {
-      let reactValue = Get(realm, reactValues, i + "");
-      runtimeValuesMapping.set(reactValue, runtimeValueReferenceNames[i]);
-    }
-  });
-
-  // 7. Emit runtime code to:
-  // - Set React values array (__rv) to [], the react values pointer (__ri) to 0
-  // - Create a computed function call with original arguments to the original function.
-  // - Reference the react values inside the array (__rv)
-  if (runtimeValues.size > 0) {
-    let generator = realm.generator;
-    invariant(generator !== undefined);
-    generator.emitStatement([], createOperationDescriptor("REACT_OUTLINING_CLEAR_REACT_VALUES"));
-    generator.emitStatement(
-      [clonedFunc || func, ...args],
-      createOperationDescriptor("REACT_OUTLINING_ORIGINAL_FUNC_CALL")
-    );
-    generator.emitStatement(
-      runtimeValueReferenceNames.map(name => new StringValue(realm, name)),
-      createOperationDescriptor("REACT_OUTLINING_REFERENCE_REACT_VALUES")
-    );
-  }
-
-  // 8. Clone and remodel the return value from the outlined funciton call. This should
-  // be a form of ReactElement template, where the slots for dynamic values are assigned in
-  // the computed functions and react values array.
-  let clonedAndModelledValue = getValueWithPreviousEffectsApplied(realm, babelTransformedEffects, () =>
-    cloneAndModelValue(realm, babelTransformedResult, runtimeValuesMapping, babelTransformedEffects)
-  );
-  return returnValue(clonedAndModelledValue);
-}
-
-function printAst() {
-  console.log(generate(global.ast).code);
 }
 
 function collectNodes(node, dynamicNodes) {
@@ -1240,4 +780,653 @@ export function isAbstractValueUnaryExpression(val: AbstractValue): boolean {
       kind === "void" ||
       kind === "~")
   );
+}
+
+function isStaticNode(node) {
+  return t.isJSXText(node) || t.isStringLiteral(node) || t.isNumericLiteral(node) || t.isNullLiteral(node);
+}
+
+function visitValue(path, node, nodesToWrap, alreadyVisited, scopePaths): void {
+  if (alreadyVisited.has(node)) {
+    return;
+  }
+  alreadyVisited.add(node);
+  if (isStaticNode(node) || node === null) {
+    return;
+  }
+
+  if (t.isJSXExpressionContainer(node)) {
+    visitValue(path, node.expression, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isCallExpression(node)) {
+    nodesToWrap.add(node);
+    visitValue(path, node.callee, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isIdentifier(node) || t.isJSXIdentifier(node)) {
+    if (path.scope.hasBinding(node.name)) {
+      const binding = path.scope.getBinding(node.name);
+      const bindingPath = binding.path;
+      visitValue(bindingPath, bindingPath.node, nodesToWrap, alreadyVisited, scopePaths);
+      for (let referencePath of binding.referencePaths) {
+        visitParentNodes(referencePath, referencePath.node, nodesToWrap, alreadyVisited, scopePaths);
+      }
+    } else {
+      nodesToWrap.add(node);
+    }
+  } else if (
+    t.isVariableDeclaration(node) ||
+    t.isJSXAttribute(node) ||
+    t.isJSXOpeningElement(node) ||
+    t.isBlockStatement(node)
+  ) {
+    // These are both handled in specific locations
+    return;
+  } else if (t.isVariableDeclarator(node)) {
+    visitValue(path, node.id, nodesToWrap, alreadyVisited, scopePaths);
+    visitValue(path, node.init, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isObjectExpression(node)) {
+    for (let property of node.properties) {
+      visitValue(path, property, nodesToWrap, alreadyVisited, scopePaths);
+    }
+  } else if (t.isObjectProperty(node)) {
+    if (node.computed) {
+      visitValue(path, node.key, nodesToWrap, alreadyVisited, scopePaths);
+    }
+    visitValue(path, node.value, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isMemberExpression(node)) {
+    nodesToWrap.add(node);
+    visitValue(path, node.object, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isArrayExpression(node)) {
+    for (let element of node.elements) {
+      visitValue(path, element, nodesToWrap, alreadyVisited, scopePaths);
+    }
+  } else if (t.isConditionalExpression(node)) {
+    nodesToWrap.add(node);
+    visitValue(path, node.test, nodesToWrap, alreadyVisited, scopePaths);
+    visitValue(path, node.consequent, nodesToWrap, alreadyVisited, scopePaths);
+    visitValue(path, node.alternate, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isIfStatement(node)) {
+    visitValue(path, node.test, nodesToWrap, alreadyVisited);
+    visitValue(path, node.consequent, nodesToWrap, alreadyVisited, scopePaths);
+    visitValue(path, node.alternate, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isJSXElement(node)) {
+    visitReactElement(path, node, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isAssignmentExpression(node)) {
+    visitValue(path, node.left, nodesToWrap, alreadyVisited, scopePaths);
+    visitValue(path, node.right, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isLogicalExpression(node)) {
+    nodesToWrap.add(node);
+    visitValue(path, node.left, nodesToWrap, alreadyVisited, scopePaths);
+    visitValue(path, node.right, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isExpressionStatement(node)) {
+    visitValue(path, node.expression, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isReturnStatement(node)) {
+    visitValue(path, node.argument, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isJSXSpreadAttribute(node)) {
+    nodesToWrap.add(node.argument);
+    visitValue(path, node.argument, nodesToWrap, alreadyVisited, scopePaths);
+  } else if (t.isFunctionDeclaration(node) || t.isFunctionExpression(node) || t.isArrowFunctionExpression(node)) {
+    // Ensure we move scope if we're not already in it
+    let functionPath = scopePaths.get(node);
+    invariant(functionPath !== undefined);
+    // Find the return statement
+    functionPath.traverse({
+      ReturnStatement(returnPath) {
+        visitValue(returnPath, returnPath.node, nodesToWrap, alreadyVisited, scopePaths);
+      },
+    });
+  } else {
+    debugger;
+  }
+}
+
+function visitParentNodes(path, node, nodesToWrap, alreadyVisited, scopePaths) {
+  let parentPath = path.parentPath;
+  while (parentPath !== undefined) {
+    let parentNode = parentPath.node;
+
+    if (
+      t.isFunctionExpression(parentNode) ||
+      t.isArrowFunctionExpression(parentNode) ||
+      t.isFunctionDeclaration(parentNode) ||
+      t.isBlockStatement(parentNode)
+    ) {
+      break;
+    }
+    visitValue(path, parentNode, nodesToWrap, alreadyVisited, scopePaths);
+    parentPath = parentPath.parentPath;
+  }
+}
+
+function visitReactElement(path, node, nodesToWrap, alreadyVisited, scopePaths): void {
+  const openingElement = node.openingElement;
+  const name = openingElement.name;
+
+  if (t.isJSXIdentifier(name)) {
+    const firstChar = name.name[0];
+    if (firstChar !== firstChar.toLowerCase() || firstChar === "_" || firstChar === "$") {
+      visitValue(path, name, nodesToWrap, alreadyVisited, scopePaths);
+    }
+  }
+  for (let attr of openingElement.attributes) {
+    if (t.isJSXAttribute(attr)) {
+      const value = attr.value;
+      if (t.isJSXExpressionContainer(value)) {
+        visitValue(path, value, nodesToWrap, alreadyVisited, scopePaths);
+      }
+    } else if (t.isJSXSpreadAttribute(attr)) {
+      visitValue(path, attr, nodesToWrap, alreadyVisited, scopePaths);
+    }
+  }
+  for (let child of node.children) {
+    visitValue(path, child, nodesToWrap, alreadyVisited, scopePaths);
+  }
+  visitParentNodes(path, node, nodesToWrap, alreadyVisited, scopePaths);
+}
+
+const ReactValueVisitor = {
+  "FunctionDeclaration|FunctionExpression|ArrowFunctionExpression"(path, { scopePaths }) {
+    scopePaths.set(path.node, path);
+  },
+  CallExpression: {
+    exit(path, { nodesToWrap, alreadyVisited, scopePaths }) {
+      const node = path.node;
+      if (t.isIdentifier(node.callee) && node.callee.name === "__optimizeReactComponentTree") {
+        let component = node.arguments[0];
+        if (t.isIdentifier(component)) {
+          let binding = path.scope.getBinding(component.name);
+          invariant(binding !== undefined);
+          let bindingPath = binding.path;
+          let bindingNode = bindingPath.node;
+
+          invariant(
+            t.isFunctionDeclaration(bindingNode) ||
+              t.isFunctionExpression(bindingNode) ||
+              t.isArrowFunctionExpression(bindingNode)
+          );
+          visitValue(bindingPath, bindingNode, nodesToWrap, alreadyVisited, scopePaths);
+        }
+      }
+    },
+  },
+};
+
+// visitReactElement(path, path.node, nodesToWrap, alreadyVisited, blockOrScopeToVisit);
+
+const ReactWrapperVisitor = {
+  "CallExpression|ConditionalExpression|Identifier|JSXIdentifier": {
+    exit(path, { nodesToWrap, idCounter }) {
+      const node = path.node;
+
+      if (nodesToWrap.has(node)) {
+        path.replaceWith(
+          t.callExpression(t.identifier("__rd"), [t.numericLiteral(idCounter.counter++), t.cloneDeep(node)])
+        );
+      }
+    },
+  },
+  MemberExpression: {
+    exit(path, { nodesToWrap, idCounter }) {
+      const node = path.node;
+      let parentNode = path.parentPath.node;
+
+      if (nodesToWrap.has(node) && !t.isMemberExpression(parentNode) && !t.isCallExpression(parentNode)) {
+        // Skip assignment replacements on id
+        if (t.isAssignmentExpression(parentNode) & (parentNode.left === node)) {
+          return;
+        }
+        path.replaceWith(
+          t.callExpression(t.identifier("__rd"), [t.numericLiteral(idCounter.counter++), t.cloneDeep(node)])
+        );
+      }
+    },
+  },
+};
+
+export function transformAllReactValues() {
+  const nodesToWrap = new Set();
+  const alreadyVisited = new Set();
+  const scopePaths = new Map();
+  const idCounter = { counter: 0 };
+  traverse(global.ast, ReactValueVisitor, null, { nodesToWrap, alreadyVisited, scopePaths });
+  traverse(global.ast, ReactWrapperVisitor, null, { nodesToWrap, idCounter });
+  traverse.cache.clear();
+}
+
+function collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+  realm: Realm,
+  val: ConcreteValue,
+  runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
+  effects: Effects
+): void {
+  let temporalOperationEntry = realm.getTemporalOperationEntryFromDerivedValue(val);
+  invariant(temporalOperationEntry !== undefined);
+  let { args, operationDescriptor } = temporalOperationEntry;
+  if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_PROPERTY_CALL") {
+    let [arrayLikeObject, methodProperty, callbackfn] = args;
+    invariant(methodProperty instanceof StringValue);
+    // For now we only support nested optimized functions on map and filter
+    if (methodProperty.value === "map" || methodProperty.value === "filter") {
+      collectRuntimeValuesFromFunctionValue(realm, callbackfn, runtimeValues, possibleDeadCodeValues, effects);
+      // First arg is the referencing array
+      possibleDeadCodeValues.add(val);
+      if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayLikeObject)) {
+        collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+          realm,
+          arrayLikeObject,
+          runtimeValues,
+          possibleDeadCodeValues,
+          effects
+        );
+      } else {
+        collectRuntimeValuesFromValue(realm, arrayLikeObject, runtimeValues, possibleDeadCodeValues, effects);
+      }
+      return;
+    }
+  } else if (operationDescriptor.type === "UNKNOWN_ARRAY_METHOD_CALL") {
+    let [, arrayLikeObject] = args;
+    possibleDeadCodeValues.add(val);
+    if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(arrayLikeObject)) {
+      collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+        realm,
+        arrayLikeObject,
+        runtimeValues,
+        possibleDeadCodeValues,
+        effects
+      );
+    } else {
+      collectRuntimeValuesFromValue(realm, arrayLikeObject, runtimeValues, possibleDeadCodeValues, effects);
+    }
+    return;
+  }
+  runtimeValues.add(val);
+}
+
+function collectRuntimeValuesFromConcreteValue(
+  realm: Realm,
+  val: ConcreteValue,
+  runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
+  effects: Effects
+): void {
+  // if (val.astNode && val.astNode.start === 61236) {
+  //   debugger;
+  // }
+  if (val instanceof ObjectValue) {
+    if (!effects.createdObjects.has(val)) {
+      // If this object was created outside of the function,
+      // then we already know its values
+      return;
+    }
+    for (let [propName, binding] of val.properties) {
+      if (binding && binding.descriptor) {
+        if (propName === "callee" || propName === "prototype") {
+          // Given we don't support cloning functions now, we only check this for other objects
+          if (val instanceof FunctionValue) {
+            continue;
+          }
+          invariant(false, "TODO support prototype and callee for non-function objects");
+        }
+        let propVal = binding.descriptor.value;
+        invariant(propVal instanceof Value);
+        collectRuntimeValuesFromValue(realm, propVal, runtimeValues, possibleDeadCodeValues, effects);
+      }
+    }
+    if (val instanceof FunctionValue) {
+      collectRuntimeValuesFromFunctionValue(realm, val, runtimeValues, possibleDeadCodeValues, effects);
+    } else if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+      collectRuntimeValuesFromArrayWithNumericWidenedProperty(
+        realm,
+        val,
+        runtimeValues,
+        possibleDeadCodeValues,
+        effects
+      );
+    } else {
+      invariant(
+        val.$Prototype === realm.intrinsics.ObjectPrototype || val.$Prototype === realm.intrinsics.ArrayPrototype
+      );
+    }
+  }
+}
+
+function deeplyCheckIfConditionalBranchHasRenderValues(realm: Realm, val: Value): boolean {
+  if (val instanceof ObjectValue) {
+    return true;
+  } else if (val instanceof AbstractValue) {
+    if (val.kind === "conditional" || val.kind === "||" || val.kind === "&&") {
+      for (let arg of val.args) {
+        let check = deeplyCheckIfConditionalBranchHasRenderValues(realm, arg);
+        if (check) {
+          return true;
+        }
+      }
+    } else if (valueIsKnownReactAbstraction(realm, val)) {
+      return true;
+    }
+  } else if (val instanceof PrimitiveValue) {
+    return true;
+  }
+  return false;
+}
+
+function collectRuntimeValuesFromAbstractValue(
+  realm: Realm,
+  val: AbstractValue,
+  runtimeValues: Set<Value>,
+  possibleDeadCodeValues: Set<Value>,
+  effects: Effects
+): void {
+  // if (val.astNode && val.astNode.start === 71656) {
+  //   debugger;
+  // }
+  if (!effects.createdAbstracts.has(val)) {
+    return val;
+  }
+  if (runtimeValues.has(val)) {
+    return;
+  }
+  if (valueIsKnownReactAbstraction(realm, val)) {
+    invariant(false, "TODO");
+  }
+  if (val.isTemporal()) {
+    // If this property reference is ultimately to a React props object,
+    // then we can re-create the temporal chain (without creating runtime values.
+    // We can re-model the property access as "props.a.b.c.d" instead.)
+    if (isTemporalValueDeeplyReferencingPropsObject(realm, val)) {
+      return;
+    }
+    runtimeValues.add(val);
+  } else if (val.kind === "conditional") {
+    let [condValue, consequentVal, alternateVal] = val.args;
+
+    // runtimeValues.add(condValue);
+    collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
+    collectRuntimeValuesFromValue(realm, consequentVal, runtimeValues, possibleDeadCodeValues, effects);
+    collectRuntimeValuesFromValue(realm, alternateVal, runtimeValues, possibleDeadCodeValues, effects);
+  } else if (val.kind === "||" || val.kind === "&&") {
+    let [condValue, rightVal] = val.args;
+
+    // let concreteValues = new Set();
+    // getConcreteObjectValuesFromBranch(condValue, concreteValues);
+    // if (concreteValues.size > 0) {
+    //   collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
+    // } else {
+    //   runtimeValues.add(condValue);
+    // }
+    collectRuntimeValuesFromValue(realm, condValue, runtimeValues, possibleDeadCodeValues, effects);
+    collectRuntimeValuesFromValue(realm, rightVal, runtimeValues, possibleDeadCodeValues, effects);
+  } else if (isAbstractValueBinaryExpression(val) || isAbstractValueUnaryExpression(val)) {
+    runtimeValues.add(val);
+  } else if (val.kind !== undefined && val.kind.startsWith("template:")) {
+    // We can clone templates
+  } else if (val.args.length > 0) {
+    for (let arg of val.args) {
+      collectRuntimeValuesFromValue(realm, arg, runtimeValues, possibleDeadCodeValues, effects);
+    }
+  } else {
+    invariant(false, "TODO");
+  }
+}
+
+function validateAndMarkRuntimeValuesFromConcreteValue(
+  realm: Realm,
+  val: ConcreteValue,
+  collectedRuntimeValues: Set<Value>,
+  markedRuntimeValues: Set<Value>,
+  effects: Effects
+) {
+  if (val instanceof PrimitiveValue) {
+    return; // We don't need to mark primitve values
+  }
+  invariant(val instanceof ObjectValue);
+  if (!effects.createdObjects.has(val)) {
+    return; // We don't need to mark objects we created outside the function call
+  }
+  if (val.isPartialObject()) {
+    if (val.temporalAlias !== undefined) {
+      if (isTemporalValueDeeplyReferencingPropsObject(realm, val)) {
+        // TODO we need to probably decide if we should model this and not mark the runtime value,
+        // because do support not marking it, at the risk of code bloat. For now let's model it and not
+        // mark it as a runtime value. We can come back to this later.
+        return;
+      }
+    }
+    // We probably have to mark the runtime value
+    invariant(false, "TODO");
+  }
+  if (val.mightBeLeakedObject()) {
+    // We probably have to mark the runtime value
+    invariant(false, "TODO");
+  }
+  for (let [propName, binding] of val.properties) {
+    if (binding && binding.descriptor) {
+      if (propName === "callee" || propName === "prototype") {
+        // Given we don't support cloning functions now, we only check this for other objects
+        if (val instanceof FunctionValue) {
+          continue;
+        }
+        invariant(false, "TODO support prototype and callee for non-function objects");
+      }
+      let propVal = binding.descriptor.value;
+      invariant(propVal instanceof Value);
+      validateAndMarkRuntimeValuesFromValue(realm, propVal, collectedRuntimeValues, markedRuntimeValues, effects);
+    }
+  }
+  if (val instanceof FunctionValue) {
+    invariant(false, "TODO");
+  }
+  if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+    invariant(false, "TODO");
+  }
+}
+
+function validateAndMarkRuntimeValuesFromAbstractValue(
+  realm: Realm,
+  val: AbstractValue,
+  collectedRuntimeValues: Set<Value>,
+  markedRuntimeValues: Set<Value>,
+  effects: Effects
+) {
+  if (!effects.createdAbstracts.has(val)) {
+    return val; // We don't need to mark abstracts we created outside the function call
+  }
+  if (val.isTemporal()) {
+    if (isTemporalValueDeeplyReferencingPropsObject(realm, val)) {
+      // Very much like the case for when we have a partial object value with a temporal alias,
+      // we can model this value so we don't need a runtime value. In this case, it's probably best
+      // to create a runtime value, to reduce code bloat.
+      if (collectedRuntimeValues.has(val)) {
+        markedRuntimeValues.add(val);
+      }
+      return;
+    }
+    invariant(collectedRuntimeValues.has(val));
+    markedRuntimeValues.add(val);
+  } else if (val.kind === "conditional") {
+    let [condValue, consequentVal, alternateVal] = val.args;
+    if (collectedRuntimeValues.has(condValue)) {
+      markedRuntimeValues.add(condValue);
+    } else {
+      // This sucks :(
+      debugger;
+    }
+    if (collectedRuntimeValues.has(consequentVal)) {
+      let hasRenderValues = deeplyCheckIfConditionalBranchHasRenderValues(realm, consequentVal);
+
+      if (!hasRenderValues) {
+        debugger;
+      }
+    } else {
+      validateAndMarkRuntimeValuesFromValue(realm, consequentVal, collectedRuntimeValues, markedRuntimeValues, effects);
+    }
+    if (collectedRuntimeValues.has(alternateVal)) {
+      let hasRenderValues = deeplyCheckIfConditionalBranchHasRenderValues(realm, alternateVal);
+
+      if (!hasRenderValues) {
+        debugger;
+      }
+    } else {
+      validateAndMarkRuntimeValuesFromValue(realm, alternateVal, collectedRuntimeValues, markedRuntimeValues, effects);
+    }
+  } else {
+    debugger;
+  }
+}
+
+function validateAndMarkRuntimeValuesFromValue(
+  realm: Realm,
+  val: Value,
+  collectedRuntimeValues: Set<Value>,
+  markedRuntimeValues: Set<Value>,
+  effects: Effects
+) {
+  if (val instanceof ConcreteValue) {
+    validateAndMarkRuntimeValuesFromConcreteValue(realm, val, collectedRuntimeValues, markedRuntimeValues, effects);
+  } else {
+    validateAndMarkRuntimeValuesFromAbstractValue(realm, val, collectedRuntimeValues, markedRuntimeValues, effects);
+  }
+}
+
+export function getValueFromOutlinedFunctionComponent(
+  realm: Realm,
+  func: ECMAScriptSourceFunctionValue,
+  args: Array<Value>,
+  isRoot: boolean
+): Value {
+  const returnValue = value => {
+    let completion = new SimpleNormalCompletion(value);
+    return realm.returnOrThrowCompletion(completion);
+  };
+  // 1. Create a clone of the original function if this is the root of the component tree.
+  // Also make all the props deeply final (a constrain added to React component props)
+  let clonedFunc;
+  if (isRoot) {
+    clonedFunc = shallowCloneFunctionValue(realm, func);
+  }
+  deeplyMakeAllArgsFinal(realm, args);
+
+  // 2. Check if the component render can be inlined and also collect all runtime values.
+  // The Babel transform will have already been applied to all relevant functions before
+  // this, so we should pick up all dynamic values of interest in collectedRuntimeValues
+  // along with the associated IDs of the __rd call that they belong. We can use the ID
+  // at a later point to determine which __rd calls can be deadcoded away.
+  let collectedRuntimeValues = new Map();
+  let [effects, result] = getValueAndEffectsFromFunctionCall(
+    realm,
+    () => {
+      setupEnvironmentForOutlining(realm, collectedRuntimeValues);
+      return clonedFunc || func;
+    },
+    args
+  );
+
+  // 3. If the result is primitive or there were no runtime values, then we can safely inline
+  // the function call without causing bloat.
+  if (result instanceof PrimitiveValue || collectedRuntimeValues.size === 0) {
+    if (collectedRuntimeValues.size === 0) {
+      console.log("No collected runtime values found");
+      debugger;
+    }
+    return getValueFromFunctionCall(realm, func, realm.intrinsics.undefined, args);
+  }
+
+  // 4. Traverse through the result and find all values of interet. As we find them,
+  // we validate if they are in our collect runtime values set and if we need them
+  // or not. If we need them, we add them to the marked runtime values set.
+  const markedRuntimeValues = new Set();
+  applyPreviousEffects(realm, effects, () =>
+    validateAndMarkRuntimeValuesFromValue(realm, result, collectedRuntimeValues, markedRuntimeValues, effects)
+  );
+
+  // 5. Using the marked runtime values and the collected runtime values we collect
+  // all runtime value markers we added (__rd) and used. The ones that don't get used
+  // can be dead-code eliminated later (via another Babel transform).
+
+  // 6. Fast path optimization for when there are no marked runtime values. We can clone and
+  // model the return value given we know everything is static. We also don't outline the
+  // function call here as we have no runtime values to reference from it.
+  if (markedRuntimeValues.size === 0) {
+    let emptyRuntimeValueNameMap = new Map();
+    let clonedAndModelledValue = getValueWithPreviousEffectsApplied(realm, effects, () =>
+      cloneAndModelValue(realm, result, emptyRuntimeValueNameMap, effects)
+    );
+    return returnValue(clonedAndModelledValue);
+  }
+
+  // 7. We use the marked runtime values set to create a runtime value map of
+  // values -> their intrinsic names.
+  let runtimeValueNameMap = new Map();
+  for (let markedValue of markedRuntimeValues) {
+    let intrinsicName = realm.preludeGenerator.nameGenerator.generate("outlined");
+    runtimeValueNameMap.set(markedValue, intrinsicName);
+  }
+
+  // 8. Emit runtime code to:
+  // - Set React values array (__rv) to [], the react values pointer (__ri) to 0
+  // - Create a computed function call with original arguments to the original function.
+  // - Reference the react values inside the array (__rv)
+  let generator = realm.generator;
+  invariant(generator !== undefined);
+  generator.emitStatement([], createOperationDescriptor("REACT_OUTLINING_CLEAR_REACT_VALUES"));
+  generator.emitStatement(
+    [clonedFunc || func, ...args],
+    createOperationDescriptor("REACT_OUTLINING_ORIGINAL_FUNC_CALL")
+  );
+  generator.emitStatement(
+    Array.from(runtimeValueNameMap.values()).map(name => new StringValue(realm, name)),
+    createOperationDescriptor("REACT_OUTLINING_REFERENCE_REACT_VALUES")
+  );
+
+  // 9. Clone and remodel the return value from the outlined funciton call. This should
+  // be a form of ReactElement template, where the slots for dynamic values are assigned in
+  // the computed functions and react values array.
+  let clonedAndModelledValue = getValueWithPreviousEffectsApplied(realm, effects, () =>
+    cloneAndModelValue(realm, result, runtimeValueNameMap, effects)
+  );
+  return returnValue(clonedAndModelledValue);
+
+  // 5. Generate a set of variable references for each of the runtime variables
+  // and map the variable references to the new values
+  // let runtimeValueReferenceNames;
+  // let runtimeValuesMapping = new Map();
+
+  // applyPreviousEffects(realm, effects, () => {
+  //   let reactValues = Get(realm, realm.$GlobalObject, "__rv");
+  //   let totalValues = reactValues.properties.size;
+
+  //   runtimeValueReferenceNames = Array.from(Array(totalValues)).map(() =>
+  //     realm.preludeGenerator.nameGenerator.generate("outlined")
+  //   );
+
+  //   for (let i = 0; i < totalValues; i++) {
+  //     let reactValue = Get(realm, reactValues, i + "");
+  //     runtimeValuesMapping.set(reactValue, runtimeValueReferenceNames[i]);
+  //   }
+  // });
+
+  // 7. Emit runtime code to:
+  // - Set React values array (__rv) to [], the react values pointer (__ri) to 0
+  // - Create a computed function call with original arguments to the original function.
+  // - Reference the react values inside the array (__rv)
+
+  // TODO skip this if no values are used?
+  // let generator = realm.generator;
+  // invariant(generator !== undefined);
+  // generator.emitStatement([], createOperationDescriptor("REACT_OUTLINING_CLEAR_REACT_VALUES"));
+  // generator.emitStatement(
+  //   [clonedFunc || func, ...args],
+  //   createOperationDescriptor("REACT_OUTLINING_ORIGINAL_FUNC_CALL")
+  // );
+  // generator.emitStatement(
+  //   runtimeValueReferenceNames.map(name => new StringValue(realm, name)),
+  //   createOperationDescriptor("REACT_OUTLINING_REFERENCE_REACT_VALUES")
+  // );
+
+  // 8. Clone and remodel the return value from the outlined funciton call. This should
+  // be a form of ReactElement template, where the slots for dynamic values are assigned in
+  // the computed functions and react values array.
+  // let clonedAndModelledValue = getValueWithPreviousEffectsApplied(realm, effects, () =>
+  //   cloneAndModelValue(realm, result, runtimeValuesMapping, effects)
+  // );
+  // return returnValue(clonedAndModelledValue);
 }
