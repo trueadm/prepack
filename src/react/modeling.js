@@ -21,7 +21,6 @@ import {
   AbstractObjectValue,
   AbstractValue,
   ArrayValue,
-  BoundFunctionValue,
   ConcreteValue,
   ECMAScriptSourceFunctionValue,
   FunctionValue,
@@ -34,17 +33,21 @@ import {
 import invariant from "../invariant.js";
 import { type WriteEffects } from "../serializer/types.js";
 import { getInitialProps } from "./components.js";
-import { getValueFromFunctionCall } from "./utils.js";
+import { getValueFromFunctionCall, valueIsKnownReactAbstraction } from "./utils.js";
 import { ReactModelingFailure } from "./errors.js";
 import { Get } from "../methods/get.js";
-import { Environment, Properties } from "../singletons.js";
+import { Create, Environment, Properties } from "../singletons.js";
 import { createAdditionalEffects } from "../serializer/utils.js";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import { ValuesDomain } from "../domains/index.js";
 import { createOperationDescriptor } from "../utils/generator.js";
 
-function getValueAndEffectsFromFunctionCall(realm: Realm, inGlobalEnv: boolean, func: () => Value | Completion) {
+function getValueAndEffectsFromFunctionCall(
+  realm: Realm,
+  inGlobalEnv: boolean,
+  func: () => Value | Completion
+): [Effects, Value] {
   let effects = inGlobalEnv
     ? realm.evaluateForEffectsInGlobalEnv(() => func(), null, "getValueAndEffectsFromFunctionCall")
     : realm.evaluateForEffects(() => func(), null, "getValueAndEffectsFromFunctionCall");
@@ -227,39 +230,166 @@ function createWidenedEnvForFunctionComponent(realm: Realm, func: ECMAScriptSour
   return env;
 }
 
-function modelReactComponentInWidenedEnvironment(realm: Realm, func: ECMAScriptSourceFunctionValue) {
-  // Model the props object as the first argument for this function
-  let thisValue = realm.intrinsics.undefined; // We only deal with function components, so there is no "this"
-  let args = [getInitialProps(realm, func, {})]; // We only support props (TODO: need to support forwardRef). No legacy context.
+function deeplyCheckIfConditionalBranchHasTemplateValues(realm: Realm, val: Value): boolean {
+  if (val instanceof ConcreteValue) {
+    return true;
+  }
+  invariant(val instanceof AbstractValue);
+  if (valueIsKnownReactAbstraction(realm, val)) {
+    return true;
+  }
+  if (val.kind === "conditional" || val.kind === "||" || val.kind === "&&") {
+    for (let arg of val.args) {
+      let check = deeplyCheckIfConditionalBranchHasTemplateValues(realm, arg);
+      if (check) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
-  // Temporarily create a new env for the function that has these bindings marked as abstract values
-  let originalEnv = func.$Environment;
-  let widenedEnvForFunction = createWidenedEnvForFunctionComponent(realm, func);
-  func.$Environment = widenedEnvForFunction;
+function collectRuntimeValuesNeededForReactTemplateFromConcreteValue(
+  realm: Realm,
+  val: ConcreteValue,
+  runtimeValues: Set<Value>
+): void {
+  if (val instanceof PrimitiveValue) {
+    return; // We don't need to mark primitve values
+  }
+  invariant(val instanceof ObjectValue);
+  if (val.isPartialObject() && !realm.react.reactProps.has(val)) {
+    invariant(false, "TODO");
+  }
+  if (val.mightBeLeakedObject()) {
+    // We probably have to mark the runtime value
+    invariant(false, "TODO");
+  }
+  for (let [propName, binding] of val.properties) {
+    if (binding && binding.descriptor) {
+      if (propName === "callee" || propName === "prototype") {
+        // Given we don't support cloning functions now, we only check this for other objects
+        if (val instanceof FunctionValue) {
+          continue;
+        }
+        invariant(false, "TODO support prototype and callee for non-function objects");
+      }
+      let propVal = binding.descriptor.value;
+      invariant(propVal instanceof Value);
+      collectRuntimeValuesNeededForReactTemplateFromValue(realm, propVal, runtimeValues);
+    }
+  }
+  if (val.temporalAlias !== undefined) {
+    collectRuntimeValuesNeededForReactTemplateFromValue(realm, val.temporalAlias, runtimeValues);
+  }
+  // TODO handle unknownProperty
+  if (val instanceof FunctionValue) {
+    invariant(false, "TODO");
+  }
+  if (ArrayValue.isIntrinsicAndHasWidenedNumericProperty(val)) {
+    invariant(false, "TODO");
+  }
+}
 
-  let renderValue;
-  try {
-    let funcCall = () => getValueFromFunctionCall(realm, func, thisValue, args);
-    renderValue = realm.isInPureScope() ? funcCall() : realm.evaluateWithPureScope(funcCall);
-  } catch (e) {
+function collectRuntimeValuesNeededForReactTemplateFromAbstractValue(
+  realm: Realm,
+  val: AbstractValue,
+  runtimeValues: Set<Value>
+): void {
+  const kind = val.kind;
+  if (kind === "conditional") {
+    let [condValue, consequentVal, alternateVal] = val.args;
+    let consequentHasTemplateValues = deeplyCheckIfConditionalBranchHasTemplateValues(realm, consequentVal);
+    let alternateHasTemplateValues = deeplyCheckIfConditionalBranchHasTemplateValues(realm, alternateVal);
+
+    if (!consequentHasTemplateValues && !alternateHasTemplateValues) {
+      runtimeValues.add(val);
+      return;
+    }
+    runtimeValues.add(condValue);
+    if (consequentHasTemplateValues) {
+      collectRuntimeValuesNeededForReactTemplateFromValue(realm, consequentVal, runtimeValues);
+    } else {
+      runtimeValues.add(consequentVal);
+    }
+    if (alternateHasTemplateValues) {
+      collectRuntimeValuesNeededForReactTemplateFromValue(realm, alternateVal, runtimeValues);
+    } else {
+      runtimeValues.add(alternateVal);
+    }
+  } else if (kind === "||" || kind === "&&") {
     debugger;
-    throw new ReactModelingFailure(
-      `Failed to model function component ${getName(realm, func)} due to evaluation error.`
-    );
-  } finally {
-    func.$Environment = originalEnv;
+  } else if (kind === "abstractConcreteUnion") {
+    // TODO does this add value?
+    runtimeValues.add(val);
+  } else if (val.isTemporal()) {
+    runtimeValues.add(val);
+  } else {
+    debugger;
   }
-  if (renderValue instanceof PrimitiveValue) {
-    return renderValue;
+}
+
+function collectRuntimeValuesNeededForReactTemplateFromValue(
+  realm: Realm,
+  val: Value,
+  runtimeValues: Set<Value>
+): void {
+  if (val instanceof ConcreteValue) {
+    collectRuntimeValuesNeededForReactTemplateFromConcreteValue(realm, val, runtimeValues);
+  } else if (val instanceof AbstractValue) {
+    collectRuntimeValuesNeededForReactTemplateFromAbstractValue(realm, val, runtimeValues);
   }
-  return renderValue;
+}
+
+function getModeledEffectFromReactComponentInWidenedEnvironment(
+  realm: Realm,
+  func: ECMAScriptSourceFunctionValue
+): { effects: Effects, tempate: Value, runtimeValuesMap: Map<Value, number> } {
+  let runtimeValuesMap = new Map();
+  let template;
+
+  let [effects] = getValueAndEffectsFromFunctionCall(realm, true, () => {
+    // Model the props object as the first argument for this function
+    let thisValue = realm.intrinsics.undefined; // We only deal with function components, so there is no "this"
+    let args = [getInitialProps(realm, func, {})]; // We only support props (TODO: need to support forwardRef). No legacy context.
+    // Temporarily create a new env for the function that has these bindings marked as abstract values
+    let originalEnv = func.$Environment;
+    let widenedEnvForFunction = createWidenedEnvForFunctionComponent(realm, func);
+    func.$Environment = widenedEnvForFunction;
+    try {
+      let funcCall = () => getValueFromFunctionCall(realm, func, thisValue, args);
+      template = realm.isInPureScope() ? funcCall() : realm.evaluateWithPureScope(funcCall);
+    } catch (e) {
+      debugger;
+      throw new ReactModelingFailure(
+        `Failed to evaluate React function component ${getName(realm, func)} due to an error.`
+      );
+    } finally {
+      func.$Environment = originalEnv;
+    }
+
+    let runtimeValues = new Set();
+    collectRuntimeValuesNeededForReactTemplateFromValue(realm, template, runtimeValues);
+
+    let componentEntryPoint = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
+    let reactRuntimeValues = Create.ArrayCreate(realm, runtimeValues.size);
+
+    let index = 0;
+    for (let runtimeValue of runtimeValues) {
+      Properties.Set(realm, reactRuntimeValues, index + "", runtimeValue, true);
+      runtimeValuesMap.set(runtimeValue, index);
+      index++;
+    }
+    Properties.Set(realm, componentEntryPoint, "__reactRuntimeValues", reactRuntimeValues, true);
+    return componentEntryPoint;
+  });
+
+  return { effects, template, runtimeValuesMap };
 }
 
 export function modelReactComponentTreeRoots(realm: Realm, func: FunctionValue, writeEffects: WriteEffects): void {
   invariant(func instanceof ECMAScriptSourceFunctionValue);
-  let [effects] = getValueAndEffectsFromFunctionCall(realm, true, () =>
-    modelReactComponentInWidenedEnvironment(realm, func)
-  );
+  let effects = getModeledEffectFromReactComponentInWidenedEnvironment(realm, func);
   let parentOptimizedFunction = realm.currentOptimizedFunction;
   let modeledFunctionEffects = createAdditionalEffects(
     realm,
