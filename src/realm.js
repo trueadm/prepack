@@ -330,6 +330,7 @@ export class Realm {
       outlinedTemporalValue: new Map(),
       output: opts.reactOutput || "create-element",
       propsWithNoPartialKeyOrRef: new WeakSet(),
+      reactComponentModels: new Map(),
       reactElements: new WeakMap(),
       reactElementStringTypeReferences: new Map(),
       reactProps: new WeakSet(),

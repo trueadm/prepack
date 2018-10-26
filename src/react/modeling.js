@@ -341,7 +341,7 @@ function collectRuntimeValuesNeededForReactTemplateFromValue(
   }
 }
 
-function getModeledEffectFromReactComponentInWidenedEnvironment(
+function getReactComponentModelInWidenedEnvironment(
   realm: Realm,
   func: ECMAScriptSourceFunctionValue
 ): { effects: Effects, tempate: Value, runtimeValuesMap: Map<Value, number> } {
@@ -389,8 +389,10 @@ function getModeledEffectFromReactComponentInWidenedEnvironment(
 
 export function modelReactComponentTreeRoots(realm: Realm, func: FunctionValue, writeEffects: WriteEffects): void {
   invariant(func instanceof ECMAScriptSourceFunctionValue);
-  let effects = getModeledEffectFromReactComponentInWidenedEnvironment(realm, func);
+  let model = getReactComponentModelInWidenedEnvironment(realm, func);
   let parentOptimizedFunction = realm.currentOptimizedFunction;
+  realm.react.reactComponentModels.set(func, model);
+  let { effects } = model;
   let modeledFunctionEffects = createAdditionalEffects(
     realm,
     effects,
