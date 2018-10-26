@@ -1113,9 +1113,9 @@ export class Generator {
     // if (id === "_$g") {
     //   debugger;
     // }
-    if (!optionalArgs || !optionalArgs.isPure) {
-      debugger;
-    }
+    // if (!optionalArgs || !optionalArgs.isPure) {
+    //   debugger;
+    // }
     this._addDerivedEntry({
       isPure: optionalArgs ? optionalArgs.isPure : undefined,
       declared: res,

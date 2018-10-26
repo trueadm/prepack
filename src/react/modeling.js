@@ -177,12 +177,21 @@ function stubObjectValue(realm, name: string, obj: ObjectValue): ObjectValue {
 }
 
 function stubAbstractValue(realm, name: string, abstract: AbstractValue): ObjectValue {
-  return AbstractValue.createFromBuildFunction(
+  let stubAbstract = AbstractValue.createTemporalFromBuildFunction(
     realm,
     abstract.getType(),
     [abstract],
     createOperationDescriptor("REACT_MOCK")
   );
+  if (stubAbstract instanceof AbstractObjectValue) {
+    let template = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
+    stubAbstract.values = new ValuesDomain(template);
+    template.intrinsicName = stubAbstract.intrinsicName;
+    template.intrinsicNameGenerated = true;
+    stubAbstract.makePartial();
+    stubAbstract.makeSimple("transitive");
+  }
+  return stubAbstract;
 }
 
 function stubValue(realm: Realm, name: string, value: Value): Value {

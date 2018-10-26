@@ -10,12 +10,11 @@
 /* @flow strict-local */
 
 import type { Realm } from "../../realm.js";
-import { AbstractValue, ArrayValue, NativeFunctionValue, StringValue, ObjectValue, Value } from "../../values/index.js";
+import { AbstractValue, ArrayValue, NativeFunctionValue, StringValue, ObjectValue } from "../../values/index.js";
 import { createMockReact } from "./react-mocks.js";
 import { createMockReactDOM, createMockReactDOMServer } from "./react-dom-mocks.js";
 import { createMockReactNative } from "./react-native-mocks.js";
 import { createMockReactRelay } from "./relay-mocks.js";
-import { createAbstract } from "../prepack/utils.js";
 import { createFbMocks } from "./fb-mocks.js";
 import { FatalError } from "../../errors";
 import { Get } from "../../methods/index.js";
@@ -119,9 +118,11 @@ export default function(realm: Realm): void {
           if (realm.fbLibraries.other.has(requireNameValValue)) {
             requireVal = realm.fbLibraries.other.get(requireNameValValue);
           } else {
+            // it's assumed that a require never brings back null/undefined (useless require if it did)
+            // so we can optimize the use-case for React
             requireVal = AbstractValue.createTemporalFromBuildFunction(
               realm,
-              Value,
+              ObjectValue,
               [new StringValue(realm, requireNameValValue)],
               createOperationDescriptor("REACT_REQUIRE_CALL"),
               { skipInvariant: true, isPure: true }
