@@ -39,7 +39,6 @@ import { ObjectValue, Value, FunctionValue } from "../values/index.js";
 import { Properties } from "../singletons.js";
 import { PropertyDescriptor } from "../descriptors.js";
 import { ResidualOptimizedFunctions } from "./ResidualOptimizedFunctions";
-import { stripDeadReactCode, transformAllReactValues } from "../react/outlining.js";
 
 export class Serializer {
   constructor(realm: Realm, serializerOptions: SerializerOptions = {}) {
@@ -152,12 +151,14 @@ export class Serializer {
 
       let reactStatistics;
       if (this.realm.react.enabled) {
-        transformAllReactValues(this.realm);
         statistics.optimizeReactComponentTreeRoots.measure(() => {
           reactStatistics = new ReactStatistics();
-          this.functions.optimizeReactComponentTreeRoots(reactStatistics);
+          this.functions.modelReactComponentTreeRoots(reactStatistics);
         });
-        stripDeadReactCode(this.realm);
+        // statistics.optimizeReactComponentTreeRoots.measure(() => {
+        //   reactStatistics = new ReactStatistics();
+        //   this.functions.optimizeReactComponentTreeRoots(reactStatistics);
+        // });
       }
 
       statistics.processCollectedNestedOptimizedFunctions.measure(() =>

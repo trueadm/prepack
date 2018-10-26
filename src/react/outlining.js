@@ -1649,3 +1649,7 @@ export function getValueFromOutlinedFunctionComponent(
   );
   return returnValue(clonedAndModelledValue);
 }
+
+export function remodelReactComponentRender(realm: Realm, func: ECMAScriptSourceFunctionValue): void {
+
+}

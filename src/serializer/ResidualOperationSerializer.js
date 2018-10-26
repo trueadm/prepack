@@ -338,6 +338,9 @@ export class ResidualOperationSerializer {
       case "REACT_DEFAULT_PROPS_HELPER":
         babelNode = this._serializeReactDefaultPropsHelper(data, nodes);
         break;
+      case "REACT_MOCK":
+        babelNode = this._serializeReactMock(data, nodes);
+        break;
       case "REACT_SSR_RENDER_VALUE_HELPER":
         babelNode = this._serializeReactRenderValueHelper(data, nodes);
         break;
@@ -355,6 +358,9 @@ export class ResidualOperationSerializer {
         break;
       case "REACT_RELAY_MOCK_CONTAINER":
         babelNode = this._serializeReactRelayMockContainer(data, nodes);
+        break;
+      case "REACT_REQUIRE_CALL":
+        babelNode = this._serializeReactRequireCall(data, nodes);
         break;
 
       // FB Mocks
@@ -628,6 +634,20 @@ export class ResidualOperationSerializer {
     let condition = this.serializeExpression(violationConditionOperationDescriptor, nodes);
     let consequent = this.getErrorStatement(throwString);
     return t.ifStatement(condition, consequent);
+  }
+
+  _serializeReactMock(
+    {  }: OperationDescriptorData,
+    [originalAbstract]: Array<BabelNodeExpression>
+  ): BabelNodeExpression {
+    return originalAbstract;
+  }
+
+  _serializeReactRequireCall(
+    {  }: OperationDescriptorData,
+    [requireName]: Array<BabelNodeExpression>
+  ): BabelNodeExpression {
+    return t.callExpression(t.identifier("require"), [requireName]);
   }
 
   _serializeReactRelayMockContainer(

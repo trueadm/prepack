@@ -52,7 +52,7 @@ import {
   HasOwnProperty,
   RequireObjectCoercible,
 } from "./index.js";
-import { Create, Functions, Properties, To } from "../singletons.js";
+import { Create, Functions, Properties, To, Utils } from "../singletons.js";
 import type {
   BabelNode,
   BabelNodeVariableDeclaration,
@@ -277,20 +277,28 @@ export class EnvironmentImplementation {
     if (this.IsPropertyReference(realm, V)) {
       if (base instanceof AbstractValue) {
         if (deferenceConditionals && !(base instanceof AbstractObjectValue)) {
+          const valueShouldBeUsedForConditionalBase = Utils.valueShouldBeUsedForConditionalBase;
           if (base.kind === "conditional") {
             let [condValue, consequentVal, alternateVal] = base.args;
             invariant(condValue instanceof AbstractValue);
-            if (isValidBaseValue(consequentVal) || isValidBaseValue(alternateVal)) {
+            if (
+              valueShouldBeUsedForConditionalBase(consequentVal) ||
+              valueShouldBeUsedForConditionalBase(alternateVal)
+            ) {
               return this._dereferenceConditional(realm, V, condValue, consequentVal, alternateVal);
             }
           } else if (base.kind === "||") {
             let [leftValue, rightValue] = base.args;
             invariant(leftValue instanceof AbstractValue);
-            return this._dereferenceConditional(realm, V, leftValue, leftValue, rightValue);
+            if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(leftValue)) {
+              return this._dereferenceConditional(realm, V, leftValue, leftValue, rightValue);
+            }
           } else if (base.kind === "&&") {
             let [leftValue, rightValue] = base.args;
             invariant(leftValue instanceof AbstractValue);
-            return this._dereferenceConditional(realm, V, leftValue, rightValue, leftValue);
+            if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(rightValue)) {
+              return this._dereferenceConditional(realm, V, leftValue, rightValue, leftValue);
+
           }
         }
         // Ensure that abstract values are coerced to objects. This might yield

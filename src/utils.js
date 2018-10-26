@@ -11,6 +11,7 @@
 
 import type { BindingEntry, Effects, Realm, SideEffectCallback } from "./realm.js";
 import {
+  AbstractObjectValue,
   AbstractValue,
   ArrayValue,
   BooleanValue,
@@ -279,4 +280,38 @@ export function reportSideEffectsFromEffects(
       sideEffectCallback("MODIFIED_BINDING", binding, value && value.expressionLocation);
     }
   }
+}
+
+export function valueShouldBeUsedForConditionalBase(val) {
+  if (val instanceof ObjectValue) {
+    return true;
+  }
+  if (val instanceof PrimitiveValue) {
+    return false;
+  }
+  let shouldBeUsed;
+  if (val.kind === "conditional" || val.kind === "&&" || val.kind === "||") {
+    let [, left, right] = val.args;
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(right);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    return true;
+  }
+  if (val.kind === "&&" || val.kind === "||") {
+    let [left, right] = val.args;
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
+    if (!shouldBeUsed) {
+      return false;
+    }
+    shouldBeUsed = valueShouldBeUsedForConditionalBase(right);
+    if (!shouldBeUsed) {
+      return false;
+    }
+  }
+  return val instanceof AbstractObjectValue && !val.values.isTop();
 }

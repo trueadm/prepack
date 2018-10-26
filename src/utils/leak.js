@@ -579,7 +579,7 @@ function ensureFrozenValue(realm, value, loc): void {
 // and all reachable bindings to abstract values.
 export class LeakImplementation {
   value(realm: Realm, value: Value, loc: ?BabelNodeSourceLocation): void {
-    if (realm.instantRender.enabled || realm.react.enabled) {
+    if (realm.instantRender.enabled) {
       // TODO: For InstantRender...
       // - For declarative bindings, we do want proper materialization/leaking/havocing
       // - For object properties, we conceptually want materialization

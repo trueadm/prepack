@@ -10,7 +10,7 @@
 /* @flow strict-local */
 
 import type { Realm } from "../../realm.js";
-import { AbstractValue, ArrayValue, NativeFunctionValue, StringValue, ObjectValue } from "../../values/index.js";
+import { AbstractValue, ArrayValue, NativeFunctionValue, StringValue, ObjectValue, Value } from "../../values/index.js";
 import { createMockReact } from "./react-mocks.js";
 import { createMockReactDOM, createMockReactDOMServer } from "./react-dom-mocks.js";
 import { createMockReactNative } from "./react-native-mocks.js";
@@ -22,6 +22,7 @@ import { Get } from "../../methods/index.js";
 import invariant from "../../invariant";
 import { createDefaultPropsHelper } from "../../react/utils.js";
 import { PropertyDescriptor } from "../../descriptors.js";
+import { createOperationDescriptor } from "../../utils/generator.js";
 
 export default function(realm: Realm): void {
   let global = realm.$GlobalObject;
@@ -118,7 +119,12 @@ export default function(realm: Realm): void {
           if (realm.fbLibraries.other.has(requireNameValValue)) {
             requireVal = realm.fbLibraries.other.get(requireNameValValue);
           } else {
-            requireVal = createAbstract(realm, "function", `require("${requireNameValValue}")`);
+            requireVal = AbstractValue.createTemporalFromBuildFunction(
+              realm,
+              Value,
+              [new StringValue(realm, requireNameValValue)],
+              createOperationDescriptor("REACT_REQUIRE_CALL")
+            );
             realm.fbLibraries.other.set(requireNameValValue, requireVal);
           }
           invariant(requireVal instanceof AbstractValue);

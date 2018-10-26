@@ -29,7 +29,7 @@ import {
   Value,
 } from "../values/index.js";
 import { Reference } from "../environment.js";
-import { Environment, Functions, Leak } from "../singletons.js";
+import { Environment, Functions, Leak, Utils } from "../singletons.js";
 import {
   ArgumentListEvaluation,
   EvaluateDirectCall,
@@ -97,19 +97,35 @@ function evaluateReference(
     ref.base.mightNotBeObject() &&
     realm.isInPureScope()
   ) {
+    const valueShouldBeUsedForConditionalBase = Utils.valueShouldBeUsedForConditionalBase;
     let base = ref.base;
     if (base.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = base.args;
       invariant(condValue instanceof AbstractValue);
-      return evaluateConditionalReferenceBase(ref, condValue, consequentVal, alternateVal, ast, strictCode, env, realm);
+      if (valueShouldBeUsedForConditionalBase(consequentVal) || valueShouldBeUsedForConditionalBase(alternateVal)) {
+        return evaluateConditionalReferenceBase(
+          ref,
+          condValue,
+          consequentVal,
+          alternateVal,
+          ast,
+          strictCode,
+          env,
+          realm
+        );
+      }
     } else if (base.kind === "||") {
       let [leftValue, rightValue] = base.args;
       invariant(leftValue instanceof AbstractValue);
-      return evaluateConditionalReferenceBase(ref, leftValue, leftValue, rightValue, ast, strictCode, env, realm);
+      if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(rightValue)) {
+        return evaluateConditionalReferenceBase(ref, leftValue, leftValue, rightValue, ast, strictCode, env, realm);
+      }
     } else if (base.kind === "&&") {
       let [leftValue, rightValue] = base.args;
       invariant(leftValue instanceof AbstractValue);
-      return evaluateConditionalReferenceBase(ref, leftValue, rightValue, leftValue, ast, strictCode, env, realm);
+      if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(rightValue)) {
+        return evaluateConditionalReferenceBase(ref, leftValue, rightValue, leftValue, ast, strictCode, env, realm);
+      }
     }
     let referencedName = ref.referencedName;
 
@@ -309,6 +325,18 @@ function EvaluateCall(
   realm: Realm
 ): Value {
   if (func instanceof AbstractValue) {
+    if (func.kind === "stub function") {
+      return EvaluateDirectCall(
+        realm,
+        strictCode,
+        env,
+        ref,
+        func.$StubFunction,
+        realm.intrinsics.undefined,
+        ast.arguments,
+        false
+      );
+    }
     let loc = ast.callee.type === "MemberExpression" ? ast.callee.property.loc : ast.callee.loc;
     if (func.kind === "conditional") {
       let [condValue, consequentVal, alternateVal] = func.args;

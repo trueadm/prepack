@@ -39,6 +39,7 @@ import type { ArgModel } from "../types.js";
 import { optionalStringOfLocation } from "../utils/babelhelpers";
 import { Properties, Utils } from "../singletons.js";
 import { PropertyDescriptor } from "../descriptors.js";
+import { modelReactComponentTreeRoots } from "../react/modeling.js";
 
 type AdditionalFunctionEntry = {
   value: ECMAScriptSourceFunctionValue | AbstractValue,
@@ -176,6 +177,13 @@ export class Functions {
         alreadyEvaluated,
         this.reactFunctionMap
       );
+    }
+  }
+
+  modelReactComponentTreeRoots(statistics: ReactStatistics): void {
+    let recordedReactRootValues = this._generateInitialAdditionalFunctions("__reactComponentTrees");
+    for (let { value: componentRoot } of recordedReactRootValues) {
+      modelReactComponentTreeRoots(this.realm, componentRoot, this._writeEffects);
     }
   }
 
