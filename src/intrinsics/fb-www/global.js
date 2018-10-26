@@ -123,7 +123,8 @@ export default function(realm: Realm): void {
               realm,
               Value,
               [new StringValue(realm, requireNameValValue)],
-              createOperationDescriptor("REACT_REQUIRE_CALL")
+              createOperationDescriptor("REACT_REQUIRE_CALL"),
+              { skipInvariant: true, isPure: true }
             );
             realm.fbLibraries.other.set(requireNameValValue, requireVal);
           }

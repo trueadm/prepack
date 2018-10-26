@@ -608,7 +608,8 @@ export function Call(realm: Realm, F: Value, V: Value, argsList?: Array<Value>):
         realm,
         Value,
         fullArgs,
-        createOperationDescriptor("CALL_ABSTRACT_FUNC")
+        createOperationDescriptor("CALL_ABSTRACT_FUNC"),
+        realm.react.enabled ? { skipInvariant: true, isPure: true } : undefined
       );
     } else {
       let fullArgs = [F, V].concat(argsList);
@@ -616,7 +617,8 @@ export function Call(realm: Realm, F: Value, V: Value, argsList?: Array<Value>):
         realm,
         Value,
         fullArgs,
-        createOperationDescriptor("CALL_ABSTRACT_FUNC_THIS")
+        createOperationDescriptor("CALL_ABSTRACT_FUNC_THIS"),
+        realm.react.enabled ? { skipInvariant: true, isPure: true } : undefined
       );
     }
   }

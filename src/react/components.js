@@ -82,6 +82,7 @@ export function getInitialProps(
     }
   }
   let abstractPropsObject = AbstractValue.createAbstractObject(realm, propsName || "props", shape);
+  abstractPropsObject.makeSimple("transitive");
   invariant(abstractPropsObject instanceof AbstractObjectValue);
   flagPropsWithNoPartialKeyOrRef(realm, abstractPropsObject);
   abstractPropsObject.makeFinal();

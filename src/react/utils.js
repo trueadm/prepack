@@ -1049,7 +1049,7 @@ export function cloneProps(realm: Realm, props: ObjectValue, newChildren?: Value
     clonedProps.makePartial();
   }
   if (props.isSimpleObject()) {
-    clonedProps.makeSimple();
+    clonedProps.makeSimple("transitive");
   }
   if (realm.react.propsWithNoPartialKeyOrRef.has(props)) {
     flagPropsWithNoPartialKeyOrRef(realm, clonedProps);

@@ -264,7 +264,8 @@ function generateRuntimeCall(
     realm,
     resultType,
     args,
-    createOperationDescriptor("CALL_BAILOUT", { propRef: propName, thisArg })
+    createOperationDescriptor("CALL_BAILOUT", { propRef: propName, thisArg }),
+    realm.react.enabled ? { skipInvariant: true, isPure: true } : undefined
   );
 }
 

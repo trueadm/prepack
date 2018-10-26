@@ -168,7 +168,7 @@ function createPropsObject(
         (defaultProps.isPartialObject() || defaultPropsEvaluated !== defaultProps.properties.size)
       ) {
         props.makePartial();
-        props.makeSimple();
+        props.makeSimple("transitive");
         // if the props has any properties that are "undefined", we need to make them abstract
         // as the helper function applies defaultProps on values that are undefined or do not
         // exist

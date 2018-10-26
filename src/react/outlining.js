@@ -76,7 +76,7 @@ function applyPostValueConfig(realm: Realm, value: Value, clonedValue: Value): v
       clonedValue.makePartial();
     }
     if (value.isSimpleObject()) {
-      clonedValue.makeSimple();
+      clonedValue.makeSimple("transitive");
     }
     if (value.mightBeFinalObject()) {
       clonedValue.makeFinal();

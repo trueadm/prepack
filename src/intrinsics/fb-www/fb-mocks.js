@@ -126,7 +126,7 @@ function createBabelHelpers(realm: Realm, global: ObjectValue | AbstractObjectVa
           value.values = new ValuesDomain(template);
         }
         // as we are returning an abstract object, we mark it as simple
-        value.makeSimple();
+        value.makeSimple("transitive");
         return value;
       } else {
         invariant(obj instanceof ObjectValue);
