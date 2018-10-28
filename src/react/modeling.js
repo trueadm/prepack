@@ -27,7 +27,6 @@ import {
   NativeFunctionValue,
   ObjectValue,
   PrimitiveValue,
-  StringValue,
   Value,
 } from "../values/index.js";
 import invariant from "../invariant.js";
