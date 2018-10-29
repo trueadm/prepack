@@ -58,4 +58,5 @@ export function addMockFunctionToObject(
     configurable: true,
   });
   funcValue.intrinsicName = `require("${requireName}").${funcName}`;
+  return funcValue;
 }

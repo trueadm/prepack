@@ -298,7 +298,7 @@ export class EnvironmentImplementation {
             invariant(leftValue instanceof AbstractValue);
             if (valueShouldBeUsedForConditionalBase(leftValue) || valueShouldBeUsedForConditionalBase(rightValue)) {
               return this._dereferenceConditional(realm, V, leftValue, rightValue, leftValue);
-
+            }
           }
         }
         // Ensure that abstract values are coerced to objects. This might yield

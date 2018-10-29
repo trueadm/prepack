@@ -151,14 +151,14 @@ export class Serializer {
 
       let reactStatistics;
       if (this.realm.react.enabled) {
-        statistics.optimizeReactComponentTreeRoots.measure(() => {
-          reactStatistics = new ReactStatistics();
-          this.functions.modelReactComponentTreeRoots(reactStatistics);
-        });
         // statistics.optimizeReactComponentTreeRoots.measure(() => {
         //   reactStatistics = new ReactStatistics();
-        //   this.functions.optimizeReactComponentTreeRoots(reactStatistics);
+        //   this.functions.modelReactComponentTreeRoots(reactStatistics);
         // });
+        statistics.optimizeReactComponentTreeRoots.measure(() => {
+          reactStatistics = new ReactStatistics();
+          this.functions.optimizeReactComponentTreeRoots(reactStatistics);
+        });
       }
 
       statistics.processCollectedNestedOptimizedFunctions.measure(() =>

@@ -235,7 +235,7 @@ export default function(realm: Realm): NativeFunctionValue {
       }
       // If we're in pure scope and the items are completely abstract,
       // then create an abstract temporal with an array kind
-      if (realm.isInPureScope() && items instanceof AbstractValue && items.values.isTop()) {
+      if (realm.isInPureScope() && items instanceof AbstractValue) {
         let args = [arrayFrom, items];
         let possibleNestedOptimizedFunctions;
         if (mapfn) {

@@ -10,16 +10,25 @@
 /* @flow */
 
 import type { Realm } from "../../realm.js";
-import { AbstractValue, ECMAScriptSourceFunctionValue, ObjectValue, StringValue } from "../../values/index.js";
+import {
+  AbstractObjectValue,
+  AbstractValue,
+  ECMAScriptSourceFunctionValue,
+  FunctionValue,
+  ObjectValue,
+  StringValue,
+} from "../../values/index.js";
 import { Environment } from "../../singletons.js";
 import invariant from "../../invariant.js";
 import { parseExpression } from "@babel/parser";
 import { createOperationDescriptor } from "../../utils/generator.js";
+import { Properties } from "../../singletons.js";
+import { createAbstract } from "../prepack/utils.js";
+import { addMockFunctionToObject } from "./utils.js";
+import { ValuesDomain } from "../../domains/index.js";
 
 let reactNativeCode = `
-  function createReactNative(React, reactNameRequireName) {
-    var Platform = __abstract("object", 'require("' + reactNameRequireName + '").Platform');
-
+  function createReactNative(React, Platform, reactNameRequireName) {
     var NativeModules = __abstract({
       nativePerformanceNow: __abstract("function"),
       nativeTraceBeginAsyncSection: __abstract("function"),
@@ -1646,11 +1655,41 @@ let reactNativeCode = `
       StyleSheet,
       Text,
       View: RCTView,
+      Platform,
     };
   }
 `;
 
 let reactNativeAst = parseExpression(reactNativeCode, { plugins: ["flow"] });
+
+function createReactNativePlatform(realm: Realm, reactNativeRequireName: string): ObjectValue {
+  let platformRequireName = `require("${reactNativeRequireName}").Platform`;
+  let platformValue = new ObjectValue(realm, realm.intrinsics.ObjectPrototype, platformRequireName);
+  platformValue.refuseSerialization = true;
+
+  let osValue = createAbstract(realm, "string", `${platformRequireName}.OS`);
+  Properties.Set(realm, platformValue, "OS", osValue, true);
+
+  let mockFunc = addMockFunctionToObject(realm, platformValue, reactNativeRequireName, "select", funcVal => {
+    let platformSelect = AbstractValue.createTemporalFromBuildFunction(
+      realm,
+      FunctionValue,
+      [funcVal],
+      createOperationDescriptor("REACT_TEMPORAL_FUNC"),
+      { skipInvariant: true, isPure: true }
+    );
+    invariant(platformSelect instanceof AbstractObjectValue);
+    let platformSelectTemplate = new ObjectValue(realm, realm.intrinsics.ObjectPrototype);
+    platformSelect.values = new ValuesDomain(new Set([platformSelectTemplate]));
+    platformSelect.makePartial();
+    platformSelect.makeSimple();
+    return platformSelect;
+  });
+  mockFunc.intrinsicName = `${platformRequireName}.select`;
+
+  platformValue.refuseSerialization = false;
+  return platformValue;
+}
 
 export function createMockReactNative(realm: Realm, reactNativeRequireName: string): ObjectValue {
   let reactNativeFactory = Environment.GetValue(realm, realm.$GlobalEnv.evaluate(reactNativeAst, false));
@@ -1696,8 +1735,10 @@ export function createMockReactNative(realm: Realm, reactNativeRequireName: stri
     reactLibrary !== undefined,
     "Could not find React library in sourcecode. Ensure React is bundled or required."
   );
+  let platformValue = createReactNativePlatform(realm, reactNativeRequireName);
   let reactNativeValue = factory(realm.intrinsics.undefined, [
     reactLibrary,
+    platformValue,
     new StringValue(realm, reactNativeRequireName),
   ]);
   invariant(reactNativeValue instanceof ObjectValue);

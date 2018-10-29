@@ -78,12 +78,16 @@ function canHoistArray(
   return true;
 }
 
-function someBindingsAreCreatedOutOfScope(realm: Realm, bindings: Set<string>, scope: LexicalEnvironment): boolean {
-  let env = scope;
+function someBindingsAreCreatedOutOfScope(
+  realm: Realm,
+  bindings: Set<string>,
+  func: ECMAScriptSourceFunctionValue
+): boolean {
+  let env = func.$Environment;
   let bindingsFound = 0;
   let totalBindings = bindings.size;
 
-  while (env !== null) {
+  while (env != null) {
     let envRec = env.environmentRecord;
 
     if (envRec instanceof DeclarativeEnvironmentRecord) {
@@ -134,7 +138,8 @@ export function flagFunctionForHoistingIfPossible(
       if (
         functionInfos &&
         functionInfos.unbound.size > 0 &&
-        someBindingsAreCreatedOutOfScope(realm, functionInfos.unbound, func.$Environment)
+        !realm.react.shallowClonedRootComponents.has(func) &&
+        someBindingsAreCreatedOutOfScope(realm, functionInfos.unbound, func)
       ) {
         return;
       }

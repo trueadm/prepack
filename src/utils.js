@@ -34,6 +34,7 @@ import type { ArgModel } from "./types.js";
 import { CompilerDiagnostic, FatalError } from "./errors.js";
 import type { Binding } from "./environment.js";
 import * as t from "@babel/types";
+import { getInitialProps } from "./react/components";
 
 export function typeToString(type: typeof Value): void | string {
   function isInstance(proto, Constructor): boolean {
@@ -173,15 +174,20 @@ export function createModelledFunctionCall(
         let paramName = ((parameterId: any): BabelNodeIdentifier).name;
         let shape = ShapeInformation.createForArgument(argModel, paramName);
         // Create an AbstractValue similar to __abstract being called
-        args.push(
-          AbstractValue.createAbstractArgument(
+        let argValue;
+
+        if (paramName === "props" || paramName === "state") {
+          argValue = getInitialProps(realm, funcValue, {});
+        } else {
+          argValue = AbstractValue.createAbstractArgument(
             realm,
             paramName,
             funcValue.expressionLocation,
             shape !== undefined ? shape.getAbstractType() : Value,
             shape
-          )
-        );
+          );
+        }
+        args.push(argValue);
       } else {
         realm.handleError(
           new CompilerDiagnostic(
@@ -290,7 +296,7 @@ export function valueShouldBeUsedForConditionalBase(val) {
     return false;
   }
   let shouldBeUsed;
-  if (val.kind === "conditional" || val.kind === "&&" || val.kind === "||") {
+  if (val.kind === "conditional") {
     let [, left, right] = val.args;
     shouldBeUsed = valueShouldBeUsedForConditionalBase(left);
     if (!shouldBeUsed) {
